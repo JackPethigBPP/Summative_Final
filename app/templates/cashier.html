@@ -1,0 +1,37 @@
+
+{% extends 'base.html' %}
+{% block content %}
+<h2>Cashier</h2>
+<form method="POST">
+  <label>Customer Name</label><br />
+  <input name="customer_name" placeholder="e.g. Alex" />
+  <label>Drink</label><br />
+  <input name="drink" placeholder="e.g. Latte" />
+  <label>Size</label><br />
+  <select name="size">
+    <option>Small</option>
+    <option>Medium</option>
+    <option>Large</option>
+  </select>
+  <label>Notes</label><br />
+  <textarea name="notes" placeholder="e.g. Oat milk"></textarea>
+  <button type="submit">Create Order</button>
+</form>
+
+<h3>Recent Orders</h3>
+<table class="table">
+  <thead><tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th>Created</th></tr></thead>
+  <tbody>
+  {% for o in orders %}
+    <tr>
+      <td>{{ o.id }}</td>
+      <td>{{ o.customer_name }}</td>
+      <td>{{ o.drink }}</td>
+      <td>{{ o.size }}</td>
+      <td><span class="badge {{ o.status.value }}">{{ o.status.value }}</span></td>
+      <td>{{ o.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

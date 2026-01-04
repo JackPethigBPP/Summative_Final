@@ -1,0 +1,84 @@
+
+name: CD
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: cafe
+
+jobs:
+  build-test-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps & run tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit
+          pytest -q
+          bandit -r app -ll
+
+      - name: Extract Git SHA
+        id: vars
+        run: echo "sha=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+
+      # Auth to AWS via GitHub OIDC (short-lived creds; secure best practice)
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # In case repo creation was not done by Terraform yet
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories --repository-names ${PROJECT_NAME}-repo >/dev/null 2>&1 || \
+          aws ecr create-repository --repository-name ${PROJECT_NAME}-repo >/dev/null
+
+      - name: Build & push image
+        run: |
+          REPO_URL=$(aws ecr describe-repositories --repository-names ${PROJECT_NAME}-repo --query 'repositories[0].repositoryUri' --output text)
+          docker build -t ${REPO_URL}:${{ steps.vars.outputs.sha }} .
+          docker push ${REPO_URL}:${{ steps.vars.outputs.sha }}
+          echo "repo_url=${REPO_URL}" >> $GITHUB_OUTPUT
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Terraform init
+        working-directory: infra
+        run: terraform init
+
+      - name: Terraform plan
+        working-directory: infra
+        run: |
+          terraform plan -var-file=env/dev.tfvars \
+            -var="image_tag=${{ steps.vars.outputs.sha }}" \
+            -out=tfplan
+
+      - name: Manual approval (prod gate)
+        uses: trstringer/manual-approval@v1
+        with:
+          approvers: ${{ github.actor }}
+
+      - name: Terraform apply
+        working-directory: infra
+        run: terraform apply -auto-approve tfplan

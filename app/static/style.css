@@ -1,0 +1,12 @@
+
+body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 0; }
+nav { background: #333; color: #fff; padding: 10px; }
+nav a { color: #fff; margin-right: 15px; text-decoration: none; }
+main { padding: 20px; }
+input, select, textarea, button { padding: 8px; margin: 5px 0; }
+.table { border-collapse: collapse; width: 100%; }
+.table th, .table td { border: 1px solid #ddd; padding: 8px; }
+.badge { padding: 4px 8px; border-radius: 4px; background: #eee; }
+.badge.NEW { background: #f0f8ff; }
+.badge.IN_PROGRESS { background: #fff4e5; }
+.badge.DONE { background: #e7ffe7; }

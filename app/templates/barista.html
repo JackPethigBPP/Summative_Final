@@ -1,0 +1,50 @@
+
+{% extends 'base.html' %}
+{% block content %}
+<h2>Barista</h2>
+<h3>Queue</h3>
+<table class="table">
+  <thead><tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
+  <tbody>
+  {% for o in queue %}
+    <tr>
+      <td>{{ o.id }}</td>
+      <td>{{ o.customer_name }}</td>
+      <td>{{ o.drink }}</td>
+      <td>{{ o.size }}</td>
+      <td><span class="badge {{ o.status.value }}">{{ o.status.value }}</span></td>
+      <td>
+        {% if o.status.value == 'NEW' %}
+          <form method="POST" action="/barista/update/{{ o.id }}/IN_PROGRESS">
+            <button type="submit">Start</button>
+          </form>
+        {% elif o.status.value == 'IN_PROGRESS' %}
+          <form method="POST" action="/barista/update/{{ o.id }}/DONE">
+            <button type="submit">Complete</button>
+          </form>
+        {% else %}
+          <em>—</em>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h3>Recently Completed</h3>
+<table class="table">
+  <thead><tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th>Completed</th></tr></thead>
+  <tbody>
+  {% for o in done %}
+    <tr>
+      <td>{{ o.id }}</td>
+      <td>{{ o.customer_name }}</td>
+      <td>{{ o.drink }}</td>
+      <td>{{ o.size }}</td>
+      <td><span class="badge {{ o.status.value }}">{{ o.status.value }}</span></td>
+      <td>{{ o.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
