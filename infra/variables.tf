@@ -9,17 +9,17 @@ variable "private_subnet_cidrs" { type = list(string) }
 variable "db_name" { type = string }
 variable "db_username" { type = string }
 
-variable "db_instance_class" { 
-  type = string
+variable "db_instance_class" {
+  type    = string
   default = "db.t3.micro"
-  }
-variable "db_allocated_storage" { 
-  type = number
+}
+variable "db_allocated_storage" {
+  type    = number
   default = 20
 }
 
-variable "desired_count" { 
-  type = number 
+variable "desired_count" {
+  type    = number
   default = 1
 }
 variable "image_tag" {
@@ -28,7 +28,7 @@ variable "image_tag" {
 }
 variable "container_port" {
   description = "Port exposed by the application container"
-  type = number
-  default = 5000
+  type        = number
+  default     = 5000
 }
 

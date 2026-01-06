@@ -9,12 +9,12 @@ variable "db_allocated_storage" { type = number }
 variable "sg_ecs_id" { type = string }
 
 resource "aws_db_subnet_group" "this" {
-  name       = "${var.project_name}-db-subnets"   # "cafe-db-subnets"
+  name       = "${var.project_name}-db-subnets" # "cafe-db-subnets"
   subnet_ids = var.private_subnet_ids
   tags       = { Name = "${var.project_name}-db-subnets" }
 
   lifecycle {
-    create_before_destroy = true  # keep if you ever change VPC/subnets
+    create_before_destroy = true # keep if you ever change VPC/subnets
   }
 }
 
@@ -45,11 +45,11 @@ resource "random_password" "db" {
 }
 
 resource "aws_db_instance" "this" {
-  identifier             = "${var.project_name}-db2"
+  identifier = "${var.project_name}-db2"
   lifecycle {
     create_before_destroy = true
   }
-  apply_immediately = true
+  apply_immediately      = true
   engine                 = "postgres"
   instance_class         = var.db_instance_class
   allocated_storage      = var.db_allocated_storage

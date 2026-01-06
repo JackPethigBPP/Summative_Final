@@ -145,7 +145,7 @@ resource "aws_launch_template" "app" {
   name_prefix   = "${var.project_name}-lt-"
   image_id      = data.aws_ami.amazon_linux2.id
   instance_type = "t3.micro"
-  key_name = "labsuser"
+  #key_name      = "labsuser"
   iam_instance_profile {
     name = "LabInstanceProfile" # pre-created in learner lab; attaches LabRole
   }

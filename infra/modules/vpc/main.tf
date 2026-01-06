@@ -25,20 +25,18 @@ variable "private_subnet_cidrs" {
 # ---- Discover AZs that are 'available' in this region ----
 data "aws_availability_zones" "available" {
   state = "available"
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required", "opted-in"]
+  }
 }
+
+
 
 # We’ll map each CIDR to a distinct AZ by index.
 # If you provide two public CIDRs and two private CIDRs, they will be assigned to AZ[0] and AZ[1] respectively.
 locals {
-  public_azs = {
-    for idx, cidr in var.public_subnet_cidrs :
-    cidr => data.aws_availability_zones.available.names[idx]
-  }
-
-  private_azs = {
-    for idx, cidr in var.private_subnet_cidrs :
-    cidr => data.aws_availability_zones.available.names[idx]
-  }
+  az_pair = slice(data.aws_availability_zones.available.names, 0, 2)
 }
 
 # ---- VPC ----
@@ -63,14 +61,13 @@ resource "aws_internet_gateway" "igw" {
 
 # ---- Public Subnets (explicit AZ assignment) ----
 resource "aws_subnet" "public" {
-  for_each                = local.public_azs
+  count                   = length(var.public_subnet_cidrs)
   vpc_id                  = aws_vpc.this.id
-  cidr_block              = each.key
-  availability_zone       = each.value
+  cidr_block              = var.public_subnet_cidrs[count.index]
+  availability_zone       = local.az_pair[count.index]
   map_public_ip_on_launch = true
-
   tags = {
-    Name = "${var.project_name}-public-${replace(each.key, "/", "-")}"
+    Name = "${var.project_name}-public-${count.index + 1}"
     Tier = "public"
   }
 }
@@ -84,28 +81,28 @@ resource "aws_route_table" "public" {
   }
 }
 
-resource "aws_route" "public_inet" {
+resource "aws_route" "public_internet" {
   route_table_id         = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.igw.id
 }
 
 resource "aws_route_table_association" "public_assoc" {
-  for_each       = aws_subnet.public
-  subnet_id      = each.value.id
+  count          = length(aws_subnet.public)
+  subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
 
 # ---- Private Subnets (explicit AZ assignment) ----
 # NOTE: Simple lab setup—no NAT gateways to reduce cost and complexity.
 resource "aws_subnet" "private" {
-  for_each          = local.private_azs
+  count             = length(var.private_subnet_cidrs)
   vpc_id            = aws_vpc.this.id
-  cidr_block        = each.key
-  availability_zone = each.value
+  cidr_block        = var.private_subnet_cidrs[count.index]
+  availability_zone = local.az_pair[count.index]
 
   tags = {
-    Name = "${var.project_name}-private-${replace(each.key, "/", "-")}"
+    Name = "${var.project_name}-private-${count.index + 1}"
     Tier = "private"
   }
 }
