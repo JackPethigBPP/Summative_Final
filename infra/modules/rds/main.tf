@@ -9,21 +9,25 @@ variable "db_allocated_storage" { type = number }
 variable "sg_ecs_id" { type = string }
 
 resource "aws_db_subnet_group" "this" {
-  name       = "${var.project_name}-db-subnets"
+  name       = "${var.project_name}-db-subnets-"
   subnet_ids = var.private_subnet_ids
-  tags = { Name = "${var.project_name}-db-subnets" }
+  tags       = { Name = "${var.project_name}-db-subnets" }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds-sg"
-  description = "Allow Postgres from ECS"
+  description = "Allow Postgres from App"
   vpc_id      = var.vpc_id
   ingress {
-    description      = "Postgres from ECS"
-    from_port        = 5432
-    to_port          = 5432
-    protocol         = "tcp"
-    security_groups  = [var.sg_ecs_id]
+    description     = "Postgres from App"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [var.sg_ecs_id]
   }
   egress {
     from_port   = 0
@@ -35,26 +39,26 @@ resource "aws_security_group" "rds" {
 }
 
 resource "random_password" "db" {
-  length  = 20
-  special = true
+  length           = 20
+  special          = true
+  override_special = "!#$%&()*+,-.:;<=>?[]^_{|}~"
 }
 
 resource "aws_db_instance" "this" {
-  identifier              = "${var.project_name}-db"
-  engine                  = "postgres"
-  engine_version          = "16.3"
-  instance_class          = var.db_instance_class
-  allocated_storage       = var.db_allocated_storage
-  db_name                 = var.db_name
-  username                = var.db_username
-  password                = random_password.db.result
-  db_subnet_group_name    = aws_db_subnet_group.this.name
-  vpc_security_group_ids  = [aws_security_group.rds.id]
-  skip_final_snapshot     = true
-  publicly_accessible     = false
-  multi_az                = false
-  storage_encrypted       = true
-  tags = { Name = "${var.project_name}-rds" }
+  identifier             = "${var.project_name}-db"
+  engine                 = "postgres"
+  instance_class         = var.db_instance_class
+  allocated_storage      = var.db_allocated_storage
+  db_name                = var.db_name
+  username               = var.db_username
+  password               = random_password.db.result
+  db_subnet_group_name   = aws_db_subnet_group.this.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  skip_final_snapshot    = true
+  publicly_accessible    = false
+  multi_az               = false
+  storage_encrypted      = true
+  tags                   = { Name = "${var.project_name}-rds" }
 }
 
 # Create SecureString SSM parameter holding the full DATABASE_URL

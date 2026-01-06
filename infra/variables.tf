@@ -10,7 +10,9 @@ variable "db_instance_class" { type = string }
 variable "db_allocated_storage" { type = number }
 variable "container_port" { type = number }
 variable "desired_count" { type = number }
-variable "image_tag" { type = string }
+variable "image_tag" {
+  type    = string
+  default = "latest"
+}
 
-# GitHub OIDC repo filter (e.g. "youruser/yourrepo")
-variable "github_repo" { type = string, default = null }
+

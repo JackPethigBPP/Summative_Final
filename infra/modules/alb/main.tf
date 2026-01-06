@@ -24,27 +24,37 @@ resource "aws_security_group" "alb" {
   tags = { Name = "${var.project_name}-alb-sg" }
 }
 
+resource "random_id" "alb_suffix" { byte_length = 4 } # ensure unique name on replacement
+
 resource "aws_lb" "this" {
-  name               = "${var.project_name}-alb"
+  name               = "${var.project_name}-alb-${random_id.alb_suffix.hex}"
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = var.public_subnet_ids
-  tags = { Name = "${var.project_name}-alb" }
+  tags               = { Name = "${var.project_name}-alb " }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_lb_target_group" "tg" {
-  name        = "${var.project_name}-tg"
+  name_prefix = var.project_name
   port        = var.container_port
   protocol    = "HTTP"
-  target_type = "ip"
+  target_type = "instance"
   vpc_id      = var.vpc_id
   health_check {
-    path                = "/cashier"
+    path                = "/healthz"
     healthy_threshold   = 2
     unhealthy_threshold = 2
     interval            = 30
     timeout             = 5
     matcher             = "200"
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
