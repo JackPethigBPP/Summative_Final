@@ -102,10 +102,52 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
+      
 
       - name: Terraform init (remote backend)
         working-directory: infra
         run: terraform init -backend-config=backend.hcl
+
+
+      # --- Import existing named resources into TF state if they already exist in AWS ---
+      - name: Import ECR repo if it exists in AWS (one-time, idempotent)
+        working-directory: infra
+        env:
+          PROJECT_NAME: cafe
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          set -e
+          # Check if the ECR repo exists in AWS
+          if aws ecr describe-repositories \
+               --repository-names "${PROJECT_NAME}-repo" \
+               --region "${AWS_REGION}" >/dev/null 2>&1; then
+            echo "ECR repo ${PROJECT_NAME}-repo exists in AWS."
+            # Import into Terraform state if not already tracked
+            terraform state show 'module.ecr.aws_ecr_repository.repo' >/dev/null 2>&1 || \
+            terraform import 'module.ecr.aws_ecr_repository.repo' "${PROJECT_NAME}-repo"
+          else
+            echo "ECR repo ${PROJECT_NAME}-repo does not exist yet; Terraform will create it."
+          fi
+
+      - name: Import RDS DB subnet group if it exists in AWS (one-time, idempotent)
+        working-directory: infra
+        env:
+          PROJECT_NAME: cafe
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          set -e
+          # Check if the DB subnet group exists in AWS
+          if aws rds describe-db-subnet-groups \
+               --db-subnet-group-name "${PROJECT_NAME}-db-subnets" \
+               --region "${AWS_REGION}" >/dev/null 2>&1; then
+            echo "RDS subnet group ${PROJECT_NAME}-db-subnets exists in AWS."
+            # Import into Terraform state if not already tracked
+            terraform state show 'module.rds.aws_db_subnet_group.this' >/dev/null 2>&1 || \
+            terraform import 'module.rds.aws_db_subnet_group.this' "${PROJECT_NAME}-db-subnets"
+          else
+            echo "RDS subnet group ${PROJECT_NAME}-db-subnets does not exist yet; Terraform will create it."
+          fi
+
 
       - name: Terraform plan
         working-directory: infra
