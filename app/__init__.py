@@ -30,5 +30,9 @@ def create_app():
     def index():
         from flask import redirect, url_for
         return redirect(url_for("cashier.cashier"))
+    
+    @app.route("/healthz")
+    def healthz():
+        return "OK", 200
 
     return app

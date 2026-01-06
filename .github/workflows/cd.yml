@@ -1,11 +1,12 @@
 
 name: CD
+
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 env:
@@ -13,8 +14,9 @@ env:
   PROJECT_NAME: cafe
 
 jobs:
-  build-test-push:
+  build-test-push-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -38,8 +40,10 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to ECR
         id: ecr
@@ -72,13 +76,15 @@ jobs:
         run: |
           terraform plan -var-file=env/dev.tfvars \
             -var="image_tag=${{ steps.vars.outputs.sha }}" \
+            -input=false \
             -out=tfplan
 
-      - name: Manual approval (prod gate)
-        uses: trstringer/manual-approval@v1
-        with:
-          approvers: ${{ github.actor }}
+# Optional manual approval step before applying to production
+#      - name: Manual approval (prod gate)
+#        uses: trstringer/manual-approval@v1
+#        with:
+#          approvers: ${{ github.actor }}
 
       - name: Terraform apply
         working-directory: infra
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -input=false-auto-approve tfplan
