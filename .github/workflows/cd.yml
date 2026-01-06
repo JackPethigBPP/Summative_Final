@@ -42,7 +42,7 @@ jobs:
         run: echo "sha=${GITHUB_SHA}" >> $GITHUB_OUTPUT
 
       # Auth to AWS via GitHub OIDC (short-lived creds; secure best practice)
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials via temporary secrets
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
