@@ -1,14 +1,27 @@
 
 variable "project_name" { type = string }
 variable "region" { type = string }
+
 variable "vpc_cidr" { type = string }
 variable "public_subnet_cidrs" { type = list(string) }
 variable "private_subnet_cidrs" { type = list(string) }
+
 variable "db_name" { type = string }
 variable "db_username" { type = string }
-variable "db_instance_class" { type = string }
-variable "db_allocated_storage" { type = number }
-variable "desired_count" { type = number }
+
+variable "db_instance_class" { 
+  type = string
+  default = "db.t3.micro"
+  }
+variable "db_allocated_storage" { 
+  type = number
+  default = 20
+}
+
+variable "desired_count" { 
+  type = number 
+  default = 1
+}
 variable "image_tag" {
   type    = string
   default = "latest"
