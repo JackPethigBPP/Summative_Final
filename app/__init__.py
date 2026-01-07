@@ -19,8 +19,11 @@ def create_app():
 
     # Ensure tables exist
     with app.app_context():
-        from . import models  # noqa
-        db.create_all()
+        try:
+            from . import models  # noqa
+            db.create_all()
+        except Exception as e:
+            print(f"WARNING: db.create_all() failed at startup: {e}")
 
     # Blueprints
     from .cashier.routes import cashier_bp
