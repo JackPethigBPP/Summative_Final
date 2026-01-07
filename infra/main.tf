@@ -105,44 +105,62 @@ locals {
     #!/bin/bash
     set -euo pipefail
 
+    # ----------------------------
     # Install Docker
+    # ----------------------------
     yum -y update
     amazon-linux-extras install docker -y || yum install -y docker
     systemctl enable docker
     systemctl start docker
 
-    # Login to ECR
+    # Ensure ec2-user can use docker (not strictly required for root scripts)
+    usermod -aG docker ec2-user || true
+
+    # ----------------------------
+    # Install AWS CLI
+    # ----------------------------
     yum install -y awscli
 
+    # ----------------------------
+    # ECR login + image pull
+    # ----------------------------
+    REGION="${var.region}"
+
     ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-    REGISTRY="${ACCOUNT_ID}.dkr.ecr.${var.region}.amazonaws.com"
+    REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
     IMAGE="${module.ecr.repository_url}:${var.image_tag}"
 
-    aws ecr get-login-password --region ${var.region} | \
+    aws ecr get-login-password --region "$REGION" | \
       docker login --username AWS --password-stdin "$REGISTRY"
 
-    # Pull app image
     docker pull "$IMAGE"
 
-    # Read DATABASE_URL from SSM (SecureString created by your RDS module)
-    DB_URL=$(aws ssm get-parameter \
+    # ----------------------------
+    # Read DATABASE_URL from SSM
+    # ----------------------------
+    DB_URL="$(aws ssm get-parameter \
       --name "/${var.project_name}/DATABASE_URL" \
       --with-decryption \
-      --region ${var.region} \
-      --query 'Parameter.Value' --output text)
-    
+      --region "$REGION" \
+      --query 'Parameter.Value' \
+      --output text || true)"
 
     if [ -z "$DB_URL" ] || [ "$DB_URL" = "None" ]; then
       echo "WARNING: SSM /${var.project_name}/DATABASE_URL empty or missing" >&2
     fi
 
-    # Run container with DATABASE_URL from SSM
-    docker run -d --name cafe-app -p 5000:5000 \
+    # ----------------------------
+    # Run application container
+    # ----------------------------
+    docker rm -f cafe-app || true
+
+    docker run -d \
+      --name cafe-app \
+      -p 5000:5000 \
       -e DATABASE_URL="$DB_URL" \
       -e FLASK_ENV=production \
       -e FLASK_DEBUG=0 \
-      "$IMAGE" \
-      python run.py
+      "$IMAGE"
   EOT
 }
 
