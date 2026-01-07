@@ -45,7 +45,7 @@ resource "random_password" "db" {
 }
 
 resource "aws_db_instance" "this" {
-  identifier = "${var.project_name}-db2"
+  identifier = "${var.project_name}-db-${substr(var.vpc_id,0,8)}"
   lifecycle {
     create_before_destroy = true
   }
