@@ -31,18 +31,24 @@ jobs:
             - name: Write backend config
               run: |
                 mkdir -p infra
-                cat > infra/backend.tf <<EOF
+                cat > infra/backend.hcl <<EOF
                 bucket = "${{ steps.acct.outputs.BUCKET }}"
                 key    = "infra/terraform.tfstate"
                 region = "${{ env.AWS_REGION }}"
                 dynamodb_table = "${{ steps.acct.outputs.LOCK_TABLE }}"
-                encrpyt = true
+                encrypt = true
                 EOF
             
             - name: Setup Terraform
               uses: hashicorp/setup-terraform@v2
               with:
                   terraform_version: 1.6.6
+            
+            - name: Ensure no stray backend.tf exists
+              working-directory: infra
+              run: |
+                rm -f backend.tf
+                ls -la
             
             - name: Terraform Init
               working-directory: infra

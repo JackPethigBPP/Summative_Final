@@ -137,6 +137,12 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
+    
+      - name: Ensuring no stray backend.tf exists
+        working-directory: infra
+        run: |
+          rm -f backend.tf
+          ls -la
 
       - name: Terraform init
         working-directory: infra
