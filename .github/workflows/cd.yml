@@ -149,7 +149,7 @@ jobs:
           set -e
           if aws ecr describe-repositories --repository-names ${{ env.PROJECT_NAME }}-repo >/dev/null 2>&1; then
             terraform state show 'module.ecr.aws_ecr_repository.repo' >/dev/null 2>&1 || \
-            terraform import -input=false 'module.ecr.aws_ecr_repository.repo' ${{ env.PROJECT_NAME }}-repo
+            terraform import -input=false -var-file=env/dev.tfvars 'module.ecr.aws_ecr_repository.repo' ${{ env.PROJECT_NAME }}-repo
           else
             echo "ECR repo not found; Terraform will create it."
           fi
@@ -160,7 +160,7 @@ jobs:
           set -e
           if aws rds describe-db-subnet-groups --db-subnet-group-name ${{ env.PROJECT_NAME }}-db-subnets >/dev/null 2>&1; then
             terraform state show 'module.rds.aws_db_subnet_group.this' >/dev/null 2>&1 || \
-            terraform import -input=false 'module.rds.aws_db_subnet_group.this' ${{ env.PROJECT_NAME }}-db-subnets
+            terraform import -input=false -var-file=env/dev.tfvars 'module.rds.aws_db_subnet_group.this' ${{ env.PROJECT_NAME }}-db-subnets
           else
             echo "DB subnet group not found; Terraform will create it."
           fi
