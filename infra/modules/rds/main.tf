@@ -71,6 +71,7 @@ resource "aws_ssm_parameter" "database_url" {
   type        = "SecureString"
   value       = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.this.address}:5432/${var.db_name}"
   description = "Database connection string for the cafe app"
+  overwrite  = true
 }
 
 output "endpoint" { value = aws_db_instance.this.address }
