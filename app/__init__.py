@@ -11,6 +11,10 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
+    @app.route("/healthz", methods=["GET"])
+    def healthz():
+        return "OK", 200
+
     db.init_app(app)
 
     # Ensure tables exist
@@ -30,9 +34,5 @@ def create_app():
     def index():
         from flask import redirect, url_for
         return redirect(url_for("cashier.cashier"))
-    
-    @app.route("/healthz")
-    def healthz():
-        return "OK", 200
 
     return app
