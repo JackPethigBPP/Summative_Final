@@ -168,6 +168,7 @@ resource "aws_autoscaling_group" "app" {
   desired_capacity    = 1
   vpc_zone_identifier = module.vpc.public_subnet_ids
   health_check_type   = "EC2"
+  wait_for_capacity_timeout = "10m" 
 
   launch_template {
     id      = aws_launch_template.app.id

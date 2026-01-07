@@ -1,9 +1,21 @@
 
 name: CD
+
 on:
   push:
     branches: [ "main" ]
+    # Prevent self-trigger from any generated/transient files, just in case
+    paths-ignore:
+      - 'infra/backend.hcl'
+      - '**/*.tfstate*'
+      - '**/*.log'
+      - '**/.terraform/**'
   workflow_dispatch: {}
+
+# Prevent parallel runs on the same branch and auto-cancel older runs
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   AWS_REGION: us-east-1
@@ -11,13 +23,17 @@ env:
 
 jobs:
   build-test-push-and-deploy:
+    # Safety net: never run forever
+    timeout-minutes: 60
+    # Extra guard: do not run if the actor is the bot (prevents “self-push” loops)
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # --- AWS creds (Learner Lab temporary secrets) ---
+      # 1) Configure AWS creds (Learner Lab secrets must be fresh)
       - name: Configure AWS credentials (temporary secrets)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -26,10 +42,22 @@ jobs:
           aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Identity check
+      # 2) Preflight sanity (fail fast on bad creds or DNS/egress)
+      - name: Who am I (AWS STS)
         run: aws sts get-caller-identity
 
-      # --- Backend bootstrap (S3 + DynamoDB) ---
+      - name: DNS sanity for AWS endpoints
+        run: |
+          python - <<'PY'
+          import socket
+          for host in ["autoscaling.us-east-1.amazonaws.com",
+                       "ecr.us-east-1.amazonaws.com",
+                       "rds.us-east-1.amazonaws.com",
+                       "elasticloadbalancing.us-east-1.amazonaws.com"]:
+              print(host, "->", socket.gethostbyname(host))
+          PY
+
+      # 3) Compute backend names (per-account S3 + DynamoDB)
       - name: Compute backend names
         id: acct
         run: |
@@ -38,14 +66,16 @@ jobs:
           echo "BUCKET=${{ env.PROJECT_NAME }}-tfstate-${ACCOUNT_ID}" >> $GITHUB_OUTPUT
           echo "LOCK_TABLE=${{ env.PROJECT_NAME }}-tf-lock" >> $GITHUB_OUTPUT
 
+      # 4) Ensure backend exists (idempotent; no commits)
       - name: Ensure backend S3 bucket exists
         run: |
           set -e
           if aws s3api head-bucket --bucket "${{ steps.acct.outputs.BUCKET }}" 2>/dev/null; then
             echo "Bucket exists: ${{ steps.acct.outputs.BUCKET }}"
           else
-            # us-east-1: create-bucket without LocationConstraint
-            aws s3api create-bucket --bucket "${{ steps.acct.outputs.BUCKET }}" --region ${{ env.AWS_REGION }}
+            aws s3api create-bucket \
+              --bucket "${{ steps.acct.outputs.BUCKET }}" \
+              --region ${{ env.AWS_REGION }}
             echo "Created bucket: ${{ steps.acct.outputs.BUCKET }}"
           fi
 
@@ -65,7 +95,7 @@ jobs:
             echo "Created lock table: ${{ steps.acct.outputs.LOCK_TABLE }}"
           fi
 
-      - name: Write backend config file
+      - name: Write backend config file (no commit)
         run: |
           mkdir -p infra
           cat > infra/backend.hcl <<EOF
@@ -76,79 +106,66 @@ jobs:
           encrypt        = true
           EOF
 
-      # --- Build & push image (works once ECR exists; first run may skip push) ---
+      # 5) Login to ECR
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      # 6) Compute image tag = Git SHA
       - name: Compute image tag
         id: vars
         run: echo "sha=${GITHUB_SHA}" >> $GITHUB_OUTPUT
 
-      - name: Try build & push (skip push if repo not found on first run)
+      # 7) Try build & push (skip if repo not yet created; TF will create it)
+      - name: Try build & push (skip on first run if repo missing)
+        env:
+          TAG: ${{ steps.vars.outputs.sha }}
         run: |
+          set -e
           REPO_URI=$(aws ecr describe-repositories \
             --repository-names ${{ env.PROJECT_NAME }}-repo \
             --query 'repositories[0].repositoryUri' \
             --output text 2>/dev/null || echo "")
           if [ -n "$REPO_URI" ]; then
-            docker build -t ${REPO_URI}:${{ steps.vars.outputs.sha }} .
-            docker push ${REPO_URI}:${{ steps.vars.outputs.sha }}
+            docker build -t ${REPO_URI}:${TAG} .
+            docker push ${REPO_URI}:${TAG}
           else
-            echo "ECR repo not yet available; Terraform will create it in this run."
+            echo "ECR repo not yet available; Terraform will create it."
           fi
 
-      # --- Terraform with remote backend ---
+      # 8) Terraform (remote backend)
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
-      
 
-      - name: Terraform init (remote backend)
+      - name: Terraform init
         working-directory: infra
         run: terraform init -backend-config=backend.hcl
 
-
-      # --- Import existing named resources into TF state if they already exist in AWS ---
-      - name: Import ECR repo if it exists in AWS (one-time, idempotent)
+      # 9) One-time imports if named resources already exist in AWS
+      - name: Import ECR repo if it exists (idempotent)
         working-directory: infra
-        env:
-          PROJECT_NAME: cafe
-          AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           set -e
-          # Check if the ECR repo exists in AWS
-          if aws ecr describe-repositories \
-               --repository-names "${PROJECT_NAME}-repo" \
-               --region "${AWS_REGION}" >/dev/null 2>&1; then
-            echo "ECR repo ${PROJECT_NAME}-repo exists in AWS."
-            # Import into Terraform state if not already tracked
+          if aws ecr describe-repositories --repository-names ${{ env.PROJECT_NAME }}-repo >/dev/null 2>&1; then
             terraform state show 'module.ecr.aws_ecr_repository.repo' >/dev/null 2>&1 || \
-            terraform import 'module.ecr.aws_ecr_repository.repo' "${PROJECT_NAME}-repo"
+            terraform import -input=false 'module.ecr.aws_ecr_repository.repo' ${{ env.PROJECT_NAME }}-repo
           else
-            echo "ECR repo ${PROJECT_NAME}-repo does not exist yet; Terraform will create it."
+            echo "ECR repo not found; Terraform will create it."
           fi
 
-      - name: Import RDS DB subnet group if it exists in AWS (one-time, idempotent)
+      - name: Import RDS subnet group if it exists (idempotent)
         working-directory: infra
-        env:
-          PROJECT_NAME: cafe
-          AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           set -e
-          # Check if the DB subnet group exists in AWS
-          if aws rds describe-db-subnet-groups \
-               --db-subnet-group-name "${PROJECT_NAME}-db-subnets" \
-               --region "${AWS_REGION}" >/dev/null 2>&1; then
-            echo "RDS subnet group ${PROJECT_NAME}-db-subnets exists in AWS."
-            # Import into Terraform state if not already tracked
+          if aws rds describe-db-subnet-groups --db-subnet-group-name ${{ env.PROJECT_NAME }}-db-subnets >/dev/null 2>&1; then
             terraform state show 'module.rds.aws_db_subnet_group.this' >/dev/null 2>&1 || \
-            terraform import 'module.rds.aws_db_subnet_group.this' "${PROJECT_NAME}-db-subnets"
+            terraform import -input=false 'module.rds.aws_db_subnet_group.this' ${{ env.PROJECT_NAME }}-db-subnets
           else
-            echo "RDS subnet group ${PROJECT_NAME}-db-subnets does not exist yet; Terraform will create it."
+            echo "DB subnet group not found; Terraform will create it."
           fi
 
-
+      # 10) Plan
       - name: Terraform plan
         working-directory: infra
         run: |
@@ -158,13 +175,39 @@ jobs:
             -input=false \
             -out=tfplan
 
-      - name: Terraform apply
+      # 11) Apply with bounded retries (handles transient DNS/egress)
+      - name: Terraform apply (bounded retries)
         working-directory: infra
-        run: terraform apply -input=false -auto-approve tfplan
+        run: |
+          set -e
+          for i in 1 2; do
+            if terraform apply -input=false -auto-approve tfplan; then
+              exit 0
+            fi
+            echo "Apply attempt $i failed; retrying in 30s..."
+            sleep 30
+          done
+          echo "Apply failed after 2 attempts"
+          exit 1
 
+      # 12) (Optional) Post-apply push for first-run convenience
+      - name: Post-apply build & push (ensure image present)
+        env:
+          TAG: ${{ steps.vars.outputs.sha }}
+        run: |
+          set -e
+          REPO_URI=$(aws ecr describe-repositories \
+            --repository-names ${{ env.PROJECT_NAME }}-repo \
+            --query 'repositories[0].repositoryUri' \
+            --output text)
+          docker build -t ${REPO_URI}:${TAG} .
+          docker push ${REPO_URI}:${TAG}
+
+      # 13) Terraform outputs
       - name: Terraform outputs (ALB DNS)
         working-directory: infra
         run: |
           terraform output || true
           echo "ALB DNS: $(terraform output -raw alb_dns || true)"
+
 
