@@ -137,16 +137,26 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
-    
-      - name: Ensuring no stray backend.tf exists
+      
+      - name: clean local terraform artifacts
         working-directory: infra
         run: |
-          rm -f backend.tf
+          rm -rf .terraform .terraform.lock.hcl terraform.tfstate terraform.tfstate.backup backend.tf
           ls -la
 
       - name: Terraform init
         working-directory: infra
         run: terraform init -backend-config=backend.hcl
+      
+      - name: Show backend config + state count (debug)
+        working-directory: infra
+        run: |
+          echo "=== backend.hcl ==="
+          cat backend.hcl
+          echo "=== workspace ==="
+          terraform workspace show
+          echo "=== state list count ==="
+          terraform state list | wc -1
 
       # 9) One-time imports if named resources already exist in AWS
       - name: Import ECR repo if it exists (idempotent)
