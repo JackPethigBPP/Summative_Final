@@ -40,7 +40,7 @@ jobs:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region:            ${{ secrets.AWS_REGION }}
+          aws-region:            ${{ env.AWS_REGION }}
 
       # 2) Preflight sanity (fail fast on bad creds or DNS/egress)
       - name: Who am I (AWS STS)
@@ -151,12 +151,18 @@ jobs:
       - name: Show backend config + state count (debug)
         working-directory: infra
         run: |
-          echo "=== backend.hcl ==="
+          echo "==== backend.hcl ===="
           cat backend.hcl
-          echo "=== workspace ==="
-          terraform workspace show
-          echo "=== state list count ==="
-          terraform state list | wc -1
+          echo "==== workspace ===="
+          terraform workspace show || true
+          echo "==== state list count ===="
+          terraform state list || echo "NO_STATE"
+      
+      - name: Check S3 state object
+        run: |
+          aws s3 ls "s3://${{ steps.acct.outputs.BUCKET }}/infra/terraform.tfstate" || true
+          echo "Listing bucket root:"
+          aws s3 ls "s3://${{ steps.acct.outputs.BUCKET }}/" || true
 
       # 9) One-time imports if named resources already exist in AWS
       - name: Import ECR repo if it exists (idempotent)
