@@ -112,11 +112,17 @@ locals {
     systemctl start docker
 
     # Login to ECR
+    yum install -y awscli
+
+    ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+    REGISTRY="${ACCOUNT_ID}.dkr.ecr.${var.region}.amazonaws.com"
+    IMAGE="${module.ecr.repository_url}:${var.image_tag}"
+
     aws ecr get-login-password --region ${var.region} | \
-      docker login --username AWS --password-stdin ${split(module.ecr.repository_url, "/")[0]}
+      docker login --username AWS --password-stdin "$REGISTRY"
 
     # Pull app image
-    docker pull ${module.ecr.repository_url}:${var.image_tag}
+    docker pull "$IMAGE"
 
     # Read DATABASE_URL from SSM (SecureString created by your RDS module)
     DB_URL=$(aws ssm get-parameter \
@@ -135,7 +141,7 @@ locals {
       -e DATABASE_URL="$DB_URL" \
       -e FLASK_ENV=production \
       -e FLASK_DEBUG=0 \
-      ${module.ecr.repository_url}:${var.image_tag} \
+      "$IMAGE" \
       python run.py
   EOT
 }
