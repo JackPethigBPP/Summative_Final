@@ -137,7 +137,10 @@ locals {
     fi
 
     # Run container with DATABASE_URL from SSM
-    docker run -d --name cafe-app -p 5000:5000 \
+    docker run -d \
+      --restart unless-stopped \
+      --name cafe-app \ 
+      -p 5000:5000 \
       -e DATABASE_URL="$DB_URL" \
       -e FLASK_ENV=production \
       -e FLASK_DEBUG=0 \
