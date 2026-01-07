@@ -162,7 +162,7 @@ resource "aws_launch_template" "app" {
 
 # Auto Scaling Group (1 instance)
 resource "aws_autoscaling_group" "app" {
-  name                = "${var.project_name}-asg"
+  name_prefix         = "${var.project_name}-asg-"
   max_size            = 1
   min_size            = 1
   desired_capacity    = 1

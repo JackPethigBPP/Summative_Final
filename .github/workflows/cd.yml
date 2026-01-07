@@ -154,36 +154,34 @@ jobs:
             echo "ECR repo not found; Terraform will create it."
           fi
 
-      - name: Import RDS subnet group if it exists (idempotent)
-        working-directory: infra
-        run: |
-          set -e
-          if aws rds describe-db-subnet-groups --db-subnet-group-name ${{ env.PROJECT_NAME }}-db-subnets >/dev/null 2>&1; then
-            terraform state show 'module.rds.aws_db_subnet_group.this' >/dev/null 2>&1 || \
-            terraform import -input=false -var-file=env/dev.tfvars 'module.rds.aws_db_subnet_group.this' ${{ env.PROJECT_NAME }}-db-subnets
-          else
-            echo "DB subnet group not found; Terraform will create it."
-          fi
+#      - name: Import RDS subnet group if it exists (idempotent)
+#        working-directory: infra
+#        run: |
+#          set -e
+#          if aws rds describe-db-subnet-groups --db-subnet-group-name ${{ env.PROJECT_NAME }}-db-subnets >/dev/null 2>&1; then
+#            terraform state show 'module.rds.aws_db_subnet_group.this' >/dev/null 2>&1 || \
+#            terraform import -input=false -var-file=env/dev.tfvars 'module.rds.aws_db_subnet_group.this' ${{ env.PROJECT_NAME }}-db-subnets
+#          else
+#            echo "DB subnet group not found; Terraform will create it."
+#          fi
 
-      # 10) Plan
-      - name: Terraform plan
-        working-directory: infra
-        run: |
-          terraform plan \
-            -var-file=env/dev.tfvars \
-            -var="image_tag=${{ steps.vars.outputs.sha }}" \
-            -input=false \
-            -out=tfplan
 
-      # 11) Apply with bounded retries (handles transient DNS/egress)
+      # 10) Apply with bounded retries (handles transient DNS/egress)
       - name: Terraform apply (bounded retries)
         working-directory: infra
         run: |
           set -e
           for i in 1 2; do
+            terraform plan \
+              -var-file=env/dev.tfvars \
+              -var="image_tag=${{ steps.vars.outputs.sha }}" \
+              -input=false \
+              -out=tfplan
+
             if terraform apply -input=false -auto-approve tfplan; then
               exit 0
             fi
+
             echo "Apply attempt $i failed; retrying in 30s..."
             sleep 30
           done

@@ -9,7 +9,7 @@ variable "db_allocated_storage" { type = number }
 variable "sg_ecs_id" { type = string }
 
 resource "aws_db_subnet_group" "this" {
-  name       = "${var.project_name}-db-subnets" # "cafe-db-subnets"
+  name       = "${var.project_name}-db-subnets-${substr(var.vpc_id,0,8)}" 
   subnet_ids = var.private_subnet_ids
   tags       = { Name = "${var.project_name}-db-subnets" }
 
