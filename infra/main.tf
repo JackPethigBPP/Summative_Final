@@ -105,37 +105,60 @@ locals {
     #!/bin/bash
     set -euo pipefail
 
+    # ----------------------------
     # Install Docker
+    # ----------------------------
     yum -y update
     amazon-linux-extras install docker -y || yum install -y docker
     systemctl enable docker
     systemctl start docker
 
-    # Login to ECR
+    # Ensure ec2-user can use docker (not strictly required for root scripts)
+    usermod -aG docker ec2-user || true
+
+    # ----------------------------
+    # Install AWS CLI
+    # ----------------------------
     yum install -y awscli
 
-    ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-    REGISTRY="${ACCOUNT_ID}.dkr.ecr.${var.region}.amazonaws.com"
-    IMAGE="${module.ecr.repository_url}:${var.image_tag}"
+    # ----------------------------
+    # ECR login + image pull
+    # ----------------------------
+    REGION="${var.region}"
 
-    aws ecr get-login-password --region ${var.region} | \
+    ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+    REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
+    IMAGE="${module.ecr.repository_url}:${var.image_tag}"
+    PORT="${var.container_port}
+
+    aws ecr get-login-password --region "$REGION" | \
       docker login --username AWS --password-stdin "$REGISTRY"
 
-    # Pull app image
     docker pull "$IMAGE"
 
-    # Read DATABASE_URL from SSM (SecureString created by your RDS module)
-    DB_URL=$(aws ssm get-parameter \
+    # ----------------------------
+    # Read DATABASE_URL from SSM
+    # ----------------------------
+    DB_URL="$(aws ssm get-parameter \
       --name "/${var.project_name}/DATABASE_URL" \
       --with-decryption \
-      --region ${var.region} \
-      --query 'Parameter.Value' --output text)
-    
+      --region "$REGION" \
+      --query 'Parameter.Value' \
+      --output text || true)"
 
     if [ -z "$DB_URL" ] || [ "$DB_URL" = "None" ]; then
       echo "WARNING: SSM /${var.project_name}/DATABASE_URL empty or missing" >&2
     fi
 
+    # ----------------------------
+    # Run application container
+    # ----------------------------
+    docker rm -f cafe-app || true
+
+    docker run -d \
+      --restart unless-stopped \
+      --name cafe-app \
+      -p "$PORT:$PORT" \
     # Run container with DATABASE_URL from SSM
     docker run -d \
       --restart unless-stopped \
@@ -144,8 +167,11 @@ locals {
       -e DATABASE_URL="$DB_URL" \
       -e FLASK_ENV=production \
       -e FLASK_DEBUG=0 \
-      "$IMAGE" \
-      python run.py
+      "$IMAGE"
+    
+    sleep 3
+    docker ps --filter "name=cafe-app" --format "{{.Names}}" | grep -q cafe-app
+    curl -fsS "http://localhost:5000/healthz
   EOT
 }
 
@@ -176,7 +202,8 @@ resource "aws_autoscaling_group" "app" {
   min_size            = 1
   desired_capacity    = 1
   vpc_zone_identifier = module.vpc.public_subnet_ids
-  health_check_type   = "EC2"
+  health_check_type   = "ELB"
+  health_check_grace_period = 300
   wait_for_capacity_timeout = "10m" 
 
   launch_template {
@@ -189,6 +216,16 @@ resource "aws_autoscaling_group" "app" {
     value               = "${var.project_name}-app"
     propagate_at_launch = true
   }
+  
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 50
+      instance_warmup        = 180
+    }
+    triggers = ["launch_template"]
+  }
+
 }
 
 resource "aws_autoscaling_attachment" "app_to_tg" {
