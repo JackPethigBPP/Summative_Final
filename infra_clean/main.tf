@@ -110,12 +110,12 @@ resource "aws_security_group" "ec2" {
   }
 
   # Optional: SSH from your IP (leave closed by default)
-  # ingress {
-  #   from_port   = 22
-  #   to_port     = 22
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["YOUR_IP/32"]
-  # }
+   ingress {
+     from_port   = 22
+     to_port     = 22
+     protocol    = "tcp"
+     cidr_blocks = ["YOUR_IP/32"]
+  }
 
   egress {
     from_port   = 0
@@ -291,7 +291,8 @@ resource "aws_autoscaling_group" "app" {
   vpc_zone_identifier       = [aws_subnet.public_a.id, aws_subnet.public_b.id]
   target_group_arns         = [aws_lb_target_group.app.arn]
   health_check_type         = "ELB"
-  health_check_grace_period = 300
+  health_check_grace_period = 1200
+
 
   launch_template {
     id      = aws_launch_template.app.id
