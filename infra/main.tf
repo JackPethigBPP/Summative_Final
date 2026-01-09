@@ -182,8 +182,9 @@ resource "aws_launch_template" "app" {
   instance_type = "t3.micro"
   #key_name      = "labsuser"
   iam_instance_profile {
-    name = "LabInstanceProfile" # pre-created in learner lab; attaches LabRole
+    name = aws_iam_instance_profile.ec2_profile.name
   }
+  
   user_data = base64encode(local.app_user_data)
   network_interfaces {
     security_groups             = [aws_security_group.app.id]
