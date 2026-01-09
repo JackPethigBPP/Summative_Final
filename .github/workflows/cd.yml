@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: eu-north-1
   PROJECT_NAME: cafe
 
 jobs:
@@ -32,6 +32,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+    
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
+        
+      - name: Set up Docker Buildx (multi-arch)
+        uses: docker/setup-buildx-action@v3
 
       # 1) Configure AWS creds (Learner Lab secrets must be fresh)
       - name: Configure AWS credentials (temporary secrets)
@@ -39,7 +45,6 @@ jobs:
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ env.AWS_REGION }}
 
       # 2) Preflight sanity (fail fast on bad creds or DNS/egress)
@@ -50,10 +55,10 @@ jobs:
         run: |
           python - <<'PY'
           import socket
-          for host in ["autoscaling.us-east-1.amazonaws.com",
-                       "ecr.us-east-1.amazonaws.com",
-                       "rds.us-east-1.amazonaws.com",
-                       "elasticloadbalancing.us-east-1.amazonaws.com"]:
+          for host in ["autoscaling.eu-north-1.amazonaws.com",
+                       "ecr.eu-north-1.amazonaws.com",
+                       "rds.eu-north-1.amazonaws.com",
+                       "elasticloadbalancing.eu-north-1.amazonaws.com"]:
               print(host, "->", socket.gethostbyname(host))
           PY
 
@@ -76,6 +81,7 @@ jobs:
             aws s3api create-bucket \
               --bucket "${{ steps.acct.outputs.BUCKET }}" \
               --region ${{ env.AWS_REGION }}
+              --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
             echo "Created bucket: ${{ steps.acct.outputs.BUCKET }}"
           fi
 
@@ -117,6 +123,7 @@ jobs:
 
       # 7) Try build & push (skip if repo not yet created; TF will create it)
       - name: Try build & push (skip on first run if repo missing)
+        id: prepush
         env:
           TAG: ${{ steps.vars.outputs.sha }}
         run: |
@@ -125,12 +132,23 @@ jobs:
             --repository-names ${{ env.PROJECT_NAME }}-repo \
             --query 'repositories[0].repositoryUri' \
             --output text 2>/dev/null || echo "")
-          if [ -n "$REPO_URI" ]; then
-            docker build -t ${REPO_URI}:${TAG} .
-            docker push ${REPO_URI}:${TAG}
+            echo "repo_uri=$REPO_URI" >> $GITHUB_OUTPUT
+            if [ -n "$REPO_URI" ]; then
+            echo "Will push to $REPO_URI"
           else
             echo "ECR repo not yet available; Terraform will create it."
           fi
+
+      - name: Build & Push image (multi-arch) - pre-apply
+        if: ${{ steps.prepush.outputs.repo_uri != '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.prepush.outputs.repo_uri }}:${{ steps.vars.outputs.sha }}
 
       # 8) Terraform (remote backend)
       - name: Setup Terraform
@@ -210,18 +228,30 @@ jobs:
           echo "Apply failed after 2 attempts"
           exit 1
 
-      # 12) (Optional) Post-apply push for first-run convenience
-      - name: Post-apply build & push (ensure image present)
-        env:
-          TAG: ${{ steps.vars.outputs.sha }}
+
+      - name: Read repo URI
+        id: repouri
         run: |
           set -e
           REPO_URI=$(aws ecr describe-repositories \
             --repository-names ${{ env.PROJECT_NAME }}-repo \
             --query 'repositories[0].repositoryUri' \
             --output text)
-          docker build -t ${REPO_URI}:${TAG} .
-          docker push ${REPO_URI}:${TAG}
+            echo "repo_uri=$REPO_URI" >> $GITHUB_OUTPUT
+
+      # 12) Post-apply build & push
+      - name: Post-apply build & push (multi-arch; ensure image present)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.repouri.outputs.repo_uri }}:${{ steps.vars.outputs.sha }}
+            ${{ steps.repouri.outputs.repo_uri }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # 13) Terraform outputs
       - name: Terraform outputs (ALB DNS)
