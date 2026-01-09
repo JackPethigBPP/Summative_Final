@@ -78,11 +78,16 @@ jobs:
           if aws s3api head-bucket --bucket "${{ steps.acct.outputs.BUCKET }}" 2>/dev/null; then
             echo "Bucket exists: ${{ steps.acct.outputs.BUCKET }}"
           else
-            aws s3api create-bucket \
-              --bucket "${{ steps.acct.outputs.BUCKET }}" \
-              --region ${{ env.AWS_REGION }}
-              --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
-            echo "Created bucket: ${{ steps.acct.outputs.BUCKET }}"
+            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+              aws s3api create-bucket \
+                --bucket "${{ steps.acct.outputs.BUCKET }}" \
+                --region ${{ env.AWS_REGION }}
+            else
+              aws s3api create-bucket \
+                --bucket "${{ steps.acct.outputs.BUCKET }}" \
+                --region ${{ env.AWS_REGION }} \
+                --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
+            fi
           fi
 
       - name: Ensure DynamoDB lock table exists
