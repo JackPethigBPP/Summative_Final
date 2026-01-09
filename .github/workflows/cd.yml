@@ -192,9 +192,17 @@ jobs:
         working-directory: infra
         run: |
           set -e
-          if aws ecr describe-repositories --repository-names ${{ env.PROJECT_NAME }}-repo >/dev/null 2>&1; then
-            terraform state show 'module.ecr.aws_ecr_repository.repo' >/dev/null 2>&1 || \
-            terraform import -input=false -var-file=env/dev.tfvars 'module.ecr.aws_ecr_repository.repo' ${{ env.PROJECT_NAME }}-repo
+          REPO_NAME="${{ env.PROJECT_NAME }}-repo"
+
+          if aws ecr describe-repositories --repository-names "$REPO_NAME" >/dev/null 2>&1; then
+            echo "ECR repo exists in AWS: $REPO_NAME"
+            TF_ADDR="module.ecr.aws_ecr_repository.repo"
+            if terraform state show "$TF_ADDR" >/dev/null 2>&1; then
+              echo "Repo already in Terraform State: $TF_ADDR"
+            else
+              echo "Importing $REPO_NAME into state at $TF_ADDR"
+              terraform import -input=false -var-file=env/dev.tfvars "TF_ADDR" "$REPO_NAME"
+            fi
           else
             echo "ECR repo not found; Terraform will create it."
           fi
