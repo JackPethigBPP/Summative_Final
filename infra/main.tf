@@ -130,7 +130,7 @@ locals {
     ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
     REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
     IMAGE="${module.ecr.repository_url}:${var.image_tag}"
-    PORT="${var.container_port}
+    PORT="${PORT:-80}"
 
     aws ecr get-login-password --region "$REGION" | \
       docker login --username AWS --password-stdin "$REGISTRY"
@@ -160,11 +160,12 @@ locals {
       --restart unless-stopped \
       --name cafe-app \
       -p "$PORT:$PORT" \
+      -e PORT="$PORT" \
     # Run container with DATABASE_URL from SSM
     docker run -d \
       --restart unless-stopped \
       --name cafe-app \ 
-      -p 5000:5000 \
+      -p "$PORT:$PORT" \
       -e DATABASE_URL="$DB_URL" \
       -e FLASK_ENV=production \
       -e FLASK_DEBUG=0 \
@@ -172,7 +173,7 @@ locals {
     
     sleep 3
     docker ps --filter "name=cafe-app" --format "{{.Names}}" | grep -q cafe-app
-    curl -fsS "http://localhost:5000/healthz
+    curl -fsS "http://localhost:80/healthz"
   EOT
 }
 
