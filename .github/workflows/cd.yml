@@ -164,7 +164,7 @@ jobs:
       - name: clean local terraform artifacts
         working-directory: infra
         run: |
-          rm -rf .terraform .terraform.lock.hcl terraform.tfstate terraform.tfstate.backup backend.tf
+          rm -rf .terraform .terraform.lock.hcl terraform.tfstate terraform.tfstate.backup
           ls -la
 
       - name: Terraform init
