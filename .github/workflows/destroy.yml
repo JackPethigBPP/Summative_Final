@@ -6,9 +6,12 @@ on:
       confirm:
         description: "Type DELETE to confirm"
         required: true
-        default: ""
-      region:
-        description: "AWS region to target"
+      target_region:
+        description: "Region to purge cafe* resources"
+        required: true
+        default: "eu-north-1"
+      backend_region:
+        description: "Region where the Terraform state bucket lives"
         required: true
         default: "eu-north-1"
 
@@ -56,7 +59,7 @@ jobs:
           cat > infra/backend.hcl <<EOF
           bucket         = "${{ steps.acct.outputs.BUCKET }}"
           key            = "infra/terraform.tfstate"
-          region         = "${{ inputs.region }}"
+          region         = "${{ inputs.backend_region }}"
           dynamodb_table = "${{ steps.acct.outputs.LOCK_TABLE }}"
           encrypt        = true
           EOF
@@ -74,14 +77,11 @@ jobs:
 
       - name: Terraform init
         working-directory: infra
-        run: terraform init -input=false -backend-config=backend.hcl -reconfigure
+        run: terraform init -input=false -backend-config=backend.hcl -reconfigure || true
 
       - name: Terraform destroy (from state)
         working-directory: infra
-        run: |
-          set +e
-          terraform destroy -auto-approve -var-file=env/dev.tfvars
-          exit 0
+        run: terraform destroy -auto-approve -var-file=env/dev.tfvars || true
 
       # ============================================================
       # BEST-EFFORT PURGE: Anything containing "cafe" in this region
@@ -90,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          REGION="${{ inputs.region }}"
+          REGION="${{ inputs.target_region }}"
           TERM="${{ env.PROJECT_NAME }}"  # "cafe"
 
           echo "=== PURGE START: region=$REGION term=$TERM ==="
