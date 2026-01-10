@@ -59,7 +59,7 @@ module "alb" {
 # EC2 App Tier (Launch Template + ASG) #
 ########################################
 
-# App security group: allow 5000 only from ALB SG
+# App security group: allow 80 only from ALB SG
 resource "aws_security_group" "app" {
   name   = "${var.project_name}-app-sg"
   vpc_id = module.vpc.vpc_id
@@ -154,26 +154,29 @@ locals {
     # ----------------------------
     # Run application container
     # ----------------------------
-    docker rm -f cafe-app || true
+    docker rm -f cafe-app >/dev/null 2>&1 || true
 
-    docker run -d \
-      --restart unless-stopped \
-      --name cafe-app \
-      -p "$PORT:$PORT" \
-      -e PORT="$PORT" \
-    # Run container with DATABASE_URL from SSM
-    docker run -d \
-      --restart unless-stopped \
-      --name cafe-app \ 
-      -p "$PORT:$PORT" \
-      -e DATABASE_URL="$DB_URL" \
+    # If your app listens on PORT inside the container, pick a sane default:
+    # Flask default is often 5000; many containers use 8000. Choose what your app uses.
+    PORT="$${PORT:=5000}"
+
+    # Build env flags (only include DATABASE_URL if present)
+    ENV_ARGS="-e PORT=$PORT"
+    if [ -n "$DB_URL" ] && [ "$DB_URL" != "None" ]; then
+      ENV_ARGS="$ENV_ARGS -e DATABASE_URL=$DB_URL"
+    fi
+
+    docker run -d --name cafe-app --restart unless-stopped \
+      -p 80:$${PORT} \
+      -e PORT=$${PORT} \
+      $ENV_ARGS \
       -e FLASK_ENV=production \
       -e FLASK_DEBUG=0 \
       "$IMAGE"
-    
+
     sleep 3
     docker ps --filter "name=cafe-app" --format "{{.Names}}" | grep -q cafe-app
-    curl -fsS "http://localhost:80/healthz"
+    curl -fsS "http://localhost/healthz"
   EOT
 }
 

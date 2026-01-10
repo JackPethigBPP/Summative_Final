@@ -58,7 +58,7 @@ jobs:
           mkdir -p infra
           cat > infra/backend.hcl <<EOF
           bucket         = "${{ steps.acct.outputs.BUCKET }}"
-          key            = "infra/terraform.tfstate"
+          key            = "infra/${{ inputs.target_region }}/terraform.tfstate"
           region         = "${{ inputs.backend_region }}"
           dynamodb_table = "${{ steps.acct.outputs.LOCK_TABLE }}"
           encrypt        = true
