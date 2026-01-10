@@ -182,6 +182,94 @@ jobs:
           terraform workspace show || true
           echo "==== state list count ===="
           terraform state list || echo "NO_STATE"
+      
+      - name: Import existing RDS security group (idempotent)
+        working-directory: infra
+        run: |
+          set -e
+          AWS_REGION="${{ env.AWS_REGION }}"
+          PROJECT_NAME="${{ env.PROJECT_NAME }}"
+          SG_NAME="${PROJECT_NAME}-rds-sg"
+          TF_ADDR='module.rds[0].aws_security_group.rds'
+
+          # Only if RDS is enabled
+          if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
+            echo "enable_rds is not true; skipping RDS SG import."
+            exit 0
+          fi
+
+          # Find SG by name (no terraform outputs needed)
+          SG_ID="$(aws ec2 describe-security-groups \
+            --region "$AWS_REGION" \
+            --filters "Name=group-name,Values=$SG_NAME" \
+            --query "SecurityGroups[0].GroupId" \
+            --output text 2>/dev/null || true)"
+
+          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+            echo "Found existing SG $SG_NAME -> $SG_ID"
+            terraform state show "$TF_ADDR" >/dev/null 2>&1 || \
+              terraform import -lock-timeout=5m "$TF_ADDR" "$SG_ID"
+          else
+            echo "No SG named $SG_NAME found; Terraform will create it."
+          fi
+
+      - name: Import RDS subnet group if it exists (idempotent)
+        working-directory: infra
+        run: |
+          set -e
+          AWS_REGION="${{ env.AWS_REGION }}"
+          PROJECT_NAME="${{ env.PROJECT_NAME }}"
+
+          if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
+            echo "enable_rds is not true; skipping subnet group import."
+            exit 0
+          fi
+
+          VPC_ID="$(terraform output -raw vpc_id 2>/dev/null || true)"
+          if [ -z "$VPC_ID" ]; then
+            echo "ERROR: terraform output vpc_id not found. Add output \"vpc_id\" in infra/outputs.tf"
+            exit 1
+          fi
+
+          VPC_PREFIX="$(echo "$VPC_ID" | cut -c1-8)"
+          SUBNET_GROUP_NAME="${PROJECT_NAME}-db-subnets-${VPC_PREFIX}"
+
+          if aws rds describe-db-subnet-groups --region "$AWS_REGION" --db-subnet-group-name "$SUBNET_GROUP_NAME" >/dev/null 2>&1; then
+            echo "Subnet group exists in AWS: $SUBNET_GROUP_NAME"
+            terraform state show 'module.rds[0].aws_db_subnet_group.this' >/dev/null 2>&1 || \
+              terraform import 'module.rds[0].aws_db_subnet_group.this' "$SUBNET_GROUP_NAME"
+          else
+            echo "Subnet group not found; Terraform will create it."
+          fi
+
+      - name: Import RDS DB instance if it exists (idempotent)
+        working-directory: infra
+        run: |
+          set -e
+          AWS_REGION="${{ env.AWS_REGION }}"
+          PROJECT_NAME="${{ env.PROJECT_NAME }}"
+
+          if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
+            echo "enable_rds is not true; skipping DB instance import."
+            exit 0
+          fi
+
+          VPC_ID="$(terraform output -raw vpc_id 2>/dev/null || true)"
+          if [ -z "$VPC_ID" ]; then
+            echo "ERROR: terraform output vpc_id not found. Add output \"vpc_id\" in infra/outputs.tf"
+            exit 1
+          fi
+
+          VPC_PREFIX="$(echo "$VPC_ID" | cut -c1-8)"
+          DB_ID="${PROJECT_NAME}-db-${VPC_PREFIX}"
+
+          if aws rds describe-db-instances --region "$AWS_REGION" --db-instance-identifier "$DB_ID" >/dev/null 2>&1; then
+            echo "DB instance exists in AWS: $DB_ID"
+            terraform state show 'module.rds[0].aws_db_instance.this' >/dev/null 2>&1 || \
+              terraform import 'module.rds[0].aws_db_instance.this' "$DB_ID"
+          else
+            echo "DB instance not found; Terraform will create it."
+          fi
 
       - name: Import IAM resources if they exist (idempotent)
         working-directory: infra
