@@ -34,8 +34,9 @@ module "ecr" {
 
 # RDS PostgreSQL
 module "rds" {
-  source               = "./modules/rds"
   count                = var.enable_rds ? 1 : 0
+  source               = "./modules/rds"
+  
   project_name         = var.project_name
   vpc_id               = module.vpc.vpc_id
   private_subnet_ids   = module.vpc.private_subnet_ids
@@ -57,7 +58,7 @@ resource "aws_security_group_rule" "rds_from_ec2" {
   to_port                  = 5432
   protocol                 = "tcp"
   security_group_id        = aws_security_group.rds.id
-  source_security_group_id = aws_security_group.ec2_sg.id
+  source_security_group_id = aws_security_group.app.id
 }
 
 # Application Load Balancer

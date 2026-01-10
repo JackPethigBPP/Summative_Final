@@ -45,7 +45,6 @@ resource "random_password" "db" {
 }
 
 resource "aws_db_instance" "this" {
-  count = var.enable_rds ? 1 : 0
   identifier = "${var.project_name}-db-${substr(var.vpc_id,0,8)}"
   lifecycle {
     create_before_destroy = true
@@ -67,4 +66,3 @@ resource "aws_db_instance" "this" {
 }
 
 output "endpoint" { value = aws_db_instance.this.address }
-output "database_url_ssm_arn" { value = aws_ssm_parameter.database_url.arn }
