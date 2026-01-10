@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type DELETE to confirm destroying Terraform + cleanup of cafe-* resources'
+        description: "Type DELETE to confirm"
         required: true
-        default: ''
+        default: ""
       region:
-        description: 'AWS region to destroy in'
+        description: "AWS region to target"
         required: true
-        default: 'us-east-1'
+        default: "eu-north-1"
 
 env:
   PROJECT_NAME: cafe
@@ -24,7 +24,7 @@ jobs:
       - name: Safety check (confirmation)
         run: |
           if [ "${{ inputs.confirm }}" != "DELETE" ]; then
-            echo "Confirmation failed. You must type DELETE to proceed."
+            echo "You must type DELETE to proceed."
             exit 1
           fi
 
@@ -39,7 +39,9 @@ jobs:
           aws-region:            ${{ inputs.region }}
 
       - name: Who am I (AWS STS)
-        run: aws sts get-caller-identity
+        run: |
+          aws sts get-caller-identity
+          aws configure get region
 
       - name: Compute backend names
         id: acct
@@ -59,14 +61,12 @@ jobs:
           dynamodb_table = "${{ steps.acct.outputs.LOCK_TABLE }}"
           encrypt        = true
           EOF
-          echo "Wrote infra/backend.hcl"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
 
-      # IMPORTANT: do NOT delete infra/backend.tf if it's committed.
       - name: Clean local Terraform artifacts
         working-directory: infra
         run: |
@@ -77,161 +77,157 @@ jobs:
         working-directory: infra
         run: terraform init -input=false -backend-config=backend.hcl -reconfigure
 
-      - name: Debug state before destroy
-        working-directory: infra
-        run: |
-          echo "===== backend.hcl ====="
-          cat backend.hcl
-          echo "===== state resources ====="
-          terraform state list || true
-
       - name: Terraform destroy (from state)
         working-directory: infra
         run: |
-          set -e
+          set +e
           terraform destroy -auto-approve -var-file=env/dev.tfvars
+          exit 0
 
-      # ---------------------------
-      # Best-effort extra cleanup
-      # ---------------------------
-      - name: Extra cleanup (best effort) - ECR/IAM/ALB/VPC
+      # ============================================================
+      # BEST-EFFORT PURGE: Anything containing "cafe" in this region
+      # ============================================================
+      - name: Purge cafe* resources (best effort)
         shell: bash
         run: |
           set +e
           REGION="${{ inputs.region }}"
-          PROJECT="${{ env.PROJECT_NAME }}"
+          TERM="${{ env.PROJECT_NAME }}"  # "cafe"
 
-          echo "=== Extra cleanup in region: $REGION (project: $PROJECT) ==="
+          echo "=== PURGE START: region=$REGION term=$TERM ==="
 
-          # ---- ECR repo cleanup (project-repo) ----
-          REPO_NAME="${PROJECT}-repo"
-          aws ecr describe-repositories --region "$REGION" --repository-names "$REPO_NAME" >/dev/null 2>&1
-          if [ $? -eq 0 ]; then
-            echo "Deleting ECR repo: $REPO_NAME"
-            aws ecr delete-repository --region "$REGION" --repository-name "$REPO_NAME" --force || true
-          else
-            echo "ECR repo not found (ok): $REPO_NAME"
-          fi
+          # -------- CloudWatch Log Groups --------
+          echo "Deleting CloudWatch log groups containing '$TERM'..."
+          for lg in $(aws logs describe-log-groups --region "$REGION" \
+            --query "logGroups[?contains(logGroupName, \`${TERM}\`)].logGroupName" \
+            --output text 2>/dev/null); do
+            echo "  - delete log group: $lg"
+            aws logs delete-log-group --region "$REGION" --log-group-name "$lg" >/dev/null 2>&1 || true
+          done
 
-          # ---- IAM cleanup (global) ----
-          ROLE_NAME="${PROJECT}-ec2-role"
-          PROFILE_NAME="${PROJECT}-ec2-profile"
+          # -------- ECR Repos --------
+          echo "Deleting ECR repositories containing '$TERM'..."
+          for repo in $(aws ecr describe-repositories --region "$REGION" \
+            --query "repositories[?contains(repositoryName, \`${TERM}\`)].repositoryName" \
+            --output text 2>/dev/null); do
+            echo "  - delete ecr repo: $repo"
+            aws ecr delete-repository --region "$REGION" --repository-name "$repo" --force >/dev/null 2>&1 || true
+          done
 
-          aws iam get-instance-profile --instance-profile-name "$PROFILE_NAME" >/dev/null 2>&1
-          if [ $? -eq 0 ]; then
-            echo "Removing role from instance profile: $PROFILE_NAME -> $ROLE_NAME"
-            aws iam remove-role-from-instance-profile --instance-profile-name "$PROFILE_NAME" --role-name "$ROLE_NAME" >/dev/null 2>&1 || true
-            echo "Deleting instance profile: $PROFILE_NAME"
-            aws iam delete-instance-profile --instance-profile-name "$PROFILE_NAME" >/dev/null 2>&1 || true
-          fi
-
-          aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1
-          if [ $? -eq 0 ]; then
-            echo "Detaching managed policies from role: $ROLE_NAME"
-            for arn in $(aws iam list-attached-role-policies --role-name "$ROLE_NAME" --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
-              aws iam detach-role-policy --role-name "$ROLE_NAME" --policy-arn "$arn" >/dev/null 2>&1 || true
-            done
-
-            echo "Deleting inline policies from role: $ROLE_NAME"
-            for pname in $(aws iam list-role-policies --role-name "$ROLE_NAME" --query 'PolicyNames[]' --output text 2>/dev/null); do
-              aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "$pname" >/dev/null 2>&1 || true
-            done
-
-            echo "Deleting role: $ROLE_NAME"
-            aws iam delete-role --role-name "$ROLE_NAME" >/dev/null 2>&1 || true
-          else
-            echo "IAM role not found (ok): $ROLE_NAME"
-          fi
-
-          # ---- ALB cleanup (best-effort: anything with 'cafe' in the name) ----
-          echo "Searching for ALBs containing '$PROJECT'..."
-          LBS=$(aws elbv2 describe-load-balancers --region "$REGION" --query "LoadBalancers[?contains(LoadBalancerName, \`${PROJECT}\`)].LoadBalancerArn" --output text 2>/dev/null)
+          # -------- ALB + Listeners + Target Groups --------
+          echo "Deleting ALBs containing '$TERM'..."
+          LBS=$(aws elbv2 describe-load-balancers --region "$REGION" \
+            --query "LoadBalancers[?contains(LoadBalancerName, \`${TERM}\`)].LoadBalancerArn" \
+            --output text 2>/dev/null)
           for lb in $LBS; do
-            echo "Deleting ALB: $lb"
+            echo "  - delete listeners for lb: $lb"
+            for lis in $(aws elbv2 describe-listeners --region "$REGION" --load-balancer-arn "$lb" \
+              --query "Listeners[].ListenerArn" --output text 2>/dev/null); do
+              aws elbv2 delete-listener --region "$REGION" --listener-arn "$lis" >/dev/null 2>&1 || true
+            done
+            echo "  - delete lb: $lb"
             aws elbv2 delete-load-balancer --region "$REGION" --load-balancer-arn "$lb" >/dev/null 2>&1 || true
           done
 
-          # Target groups (best-effort)
-          echo "Searching for Target Groups containing '$PROJECT'..."
-          TGS=$(aws elbv2 describe-target-groups --region "$REGION" --query "TargetGroups[?contains(TargetGroupName, \`${PROJECT}\`)].TargetGroupArn" --output text 2>/dev/null)
-          for tg in $TGS; do
-            echo "Deleting Target Group: $tg"
+          echo "Deleting target groups containing '$TERM'..."
+          for tg in $(aws elbv2 describe-target-groups --region "$REGION" \
+            --query "TargetGroups[?contains(TargetGroupName, \`${TERM}\`)].TargetGroupArn" \
+            --output text 2>/dev/null); do
+            echo "  - delete tg: $tg"
             aws elbv2 delete-target-group --region "$REGION" --target-group-arn "$tg" >/dev/null 2>&1 || true
           done
 
-          # ---- VPC cleanup: delete extra VPCs named cafe-vpc (best effort) ----
-          # NOTE: This targets only VPCs with Name tag exactly "${PROJECT}-vpc" (e.g., cafe-vpc).
-          echo "Searching for VPCs tagged Name=${PROJECT}-vpc ..."
-          VPCS=$(aws ec2 describe-vpcs --region "$REGION" \
-            --filters "Name=tag:Name,Values=${PROJECT}-vpc" \
-            --query "Vpcs[].VpcId" --output text 2>/dev/null)
+          # -------- Auto Scaling Groups --------
+          echo "Deleting Auto Scaling Groups containing '$TERM'..."
+          ASGS=$(aws autoscaling describe-auto-scaling-groups --region "$REGION" \
+            --query "AutoScalingGroups[?contains(AutoScalingGroupName, \`${TERM}\`)].AutoScalingGroupName" \
+            --output text 2>/dev/null)
+          for asg in $ASGS; do
+            echo "  - set desired=0 and delete asg: $asg"
+            aws autoscaling update-auto-scaling-group --region "$REGION" --auto-scaling-group-name "$asg" \
+              --min-size 0 --max-size 0 --desired-capacity 0 >/dev/null 2>&1 || true
+            aws autoscaling delete-auto-scaling-group --region "$REGION" --auto-scaling-group-name "$asg" --force-delete >/dev/null 2>&1 || true
+          done
 
+          # -------- Launch Templates --------
+          echo "Deleting Launch Templates containing '$TERM'..."
+          for lt_id in $(aws ec2 describe-launch-templates --region "$REGION" \
+            --query "LaunchTemplates[?contains(LaunchTemplateName, \`${TERM}\`)].LaunchTemplateId" \
+            --output text 2>/dev/null); do
+            echo "  - delete launch template: $lt_id"
+            aws ec2 delete-launch-template --region "$REGION" --launch-template-id "$lt_id" >/dev/null 2>&1 || true
+          done
+
+          # -------- EC2 Instances (Name tag contains cafe) --------
+          echo "Terminating EC2 instances with Name containing '$TERM'..."
+          INSTANCES=$(aws ec2 describe-instances --region "$REGION" \
+            --filters "Name=tag:Name,Values=*${TERM}*" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+            --query "Reservations[].Instances[].InstanceId" \
+            --output text 2>/dev/null)
+          if [ -n "$INSTANCES" ]; then
+            echo "  - terminate: $INSTANCES"
+            aws ec2 terminate-instances --region "$REGION" --instance-ids $INSTANCES >/dev/null 2>&1 || true
+          fi
+
+          # -------- VPC delete helper (targets VPCs whose Name tag contains cafe) --------
           delete_vpc() {
             local vpc="$1"
             echo "---- Attempting to delete VPC $vpc ----"
 
-            # Terminate NAT Gateways
-            for nat in $(aws ec2 describe-nat-gateways --region "$REGION" --filter "Name=vpc-id,Values=$vpc" --query "NatGateways[].NatGatewayId" --output text 2>/dev/null); do
-              echo "Deleting NAT gateway $nat"
+            # NAT gateways
+            for nat in $(aws ec2 describe-nat-gateways --region "$REGION" --filter "Name=vpc-id,Values=$vpc" \
+              --query "NatGateways[].NatGatewayId" --output text 2>/dev/null); do
+              echo "  - delete nat: $nat"
               aws ec2 delete-nat-gateway --region "$REGION" --nat-gateway-id "$nat" >/dev/null 2>&1 || true
             done
 
-            # Detach & delete Internet Gateways
-            for igw in $(aws ec2 describe-internet-gateways --region "$REGION" --filters "Name=attachment.vpc-id,Values=$vpc" --query "InternetGateways[].InternetGatewayId" --output text 2>/dev/null); do
-              echo "Detaching IGW $igw from $vpc"
+            # Internet gateways
+            for igw in $(aws ec2 describe-internet-gateways --region "$REGION" --filters "Name=attachment.vpc-id,Values=$vpc" \
+              --query "InternetGateways[].InternetGatewayId" --output text 2>/dev/null); do
+              echo "  - detach+delete igw: $igw"
               aws ec2 detach-internet-gateway --region "$REGION" --internet-gateway-id "$igw" --vpc-id "$vpc" >/dev/null 2>&1 || true
-              echo "Deleting IGW $igw"
               aws ec2 delete-internet-gateway --region "$REGION" --internet-gateway-id "$igw" >/dev/null 2>&1 || true
             done
 
-            # Delete VPC endpoints
-            for ep in $(aws ec2 describe-vpc-endpoints --region "$REGION" --filters "Name=vpc-id,Values=$vpc" --query "VpcEndpoints[].VpcEndpointId" --output text 2>/dev/null); do
-              echo "Deleting VPC endpoint $ep"
+            # VPC endpoints
+            for ep in $(aws ec2 describe-vpc-endpoints --region "$REGION" --filters "Name=vpc-id,Values=$vpc" \
+              --query "VpcEndpoints[].VpcEndpointId" --output text 2>/dev/null); do
+              echo "  - delete vpce: $ep"
               aws ec2 delete-vpc-endpoints --region "$REGION" --vpc-endpoint-ids "$ep" >/dev/null 2>&1 || true
             done
 
-            # Delete non-default security groups
-            for sg in $(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=$vpc" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); do
-              echo "Deleting SG $sg"
+            # Security groups (non-default)
+            for sg in $(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=$vpc" \
+              --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); do
+              echo "  - delete sg: $sg"
               aws ec2 delete-security-group --region "$REGION" --group-id "$sg" >/dev/null 2>&1 || true
             done
 
-            # Delete subnets
-            for subnet in $(aws ec2 describe-subnets --region "$REGION" --filters "Name=vpc-id,Values=$vpc" --query "Subnets[].SubnetId" --output text 2>/dev/null); do
-              echo "Deleting subnet $subnet"
+            # Subnets
+            for subnet in $(aws ec2 describe-subnets --region "$REGION" --filters "Name=vpc-id,Values=$vpc" \
+              --query "Subnets[].SubnetId" --output text 2>/dev/null); do
+              echo "  - delete subnet: $subnet"
               aws ec2 delete-subnet --region "$REGION" --subnet-id "$subnet" >/dev/null 2>&1 || true
             done
 
-            # Delete non-main route tables
-            for rtb in $(aws ec2 describe-route-tables --region "$REGION" --filters "Name=vpc-id,Values=$vpc" --query "RouteTables[?Associations[?Main==\`false\`]].RouteTableId" --output text 2>/dev/null); do
-              echo "Deleting route table $rtb"
+            # Non-main route tables
+            for rtb in $(aws ec2 describe-route-tables --region "$REGION" --filters "Name=vpc-id,Values=$vpc" \
+              --query "RouteTables[?Associations[?Main==\`false\`]].RouteTableId" --output text 2>/dev/null); do
+              echo "  - delete rtb: $rtb"
               aws ec2 delete-route-table --region "$REGION" --route-table-id "$rtb" >/dev/null 2>&1 || true
             done
 
-            # Finally delete the VPC
-            echo "Deleting VPC $vpc"
+            echo "  - delete vpc: $vpc"
             aws ec2 delete-vpc --region "$REGION" --vpc-id "$vpc" >/dev/null 2>&1 || true
           }
 
+          echo "Deleting VPCs with Name tag containing '$TERM' (excluding default VPC automatically)..."
+          VPCS=$(aws ec2 describe-vpcs --region "$REGION" \
+            --filters "Name=isDefault,Values=false" \
+            --query "Vpcs[?Tags && length(Tags[?Key==\`Name\` && contains(Value, \`${TERM}\`)])> \`0\`].VpcId" \
+            --output text 2>/dev/null)
           for vpc in $VPCS; do
             delete_vpc "$vpc"
           done
 
-          echo "=== Extra cleanup finished (best effort). ==="
-
-      # Optional: remove backend infra (state bucket/table) ONLY if you really want "empty"
-      # Uncomment if you want to delete the remote state as well.
-      #
-      # - name: Delete Terraform backend (DANGEROUS)
-      #   if: ${{ always() }}
-      #   run: |
-      #     set +e
-      #     REGION="${{ inputs.region }}"
-      #     BUCKET="${{ steps.acct.outputs.BUCKET }}"
-      #     TABLE="${{ steps.acct.outputs.LOCK_TABLE }}"
-      #     echo "Deleting state object and bucket: $BUCKET"
-      #     aws s3 rm "s3://${BUCKET}/infra/terraform.tfstate" --region "$REGION" || true
-      #     aws s3 rb "s3://${BUCKET}" --force --region "$REGION" || true
-      #     echo "Deleting DynamoDB lock table: $TABLE"
-      #     aws dynamodb delete-table --table-name "$TABLE" --region "$REGION" || true
-
+          echo "=== PURGE FINISHED (best effort). ==="
