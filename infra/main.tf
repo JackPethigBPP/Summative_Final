@@ -130,7 +130,7 @@ locals {
     ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
     REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
     IMAGE="${module.ecr.repository_url}:${var.image_tag}"
-    PORT="${PORT:-80}"
+    PORT="$${PORT:-80}"
 
     aws ecr get-login-password --region "$REGION" | \
       docker login --username AWS --password-stdin "$REGISTRY"
