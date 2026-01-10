@@ -60,15 +60,6 @@ resource "aws_security_group_rule" "rds_from_ec2" {
   source_security_group_id = aws_security_group.ec2_sg.id
 }
 
-# Create SecureString SSM parameter holding the full DATABASE_URL
-resource "aws_ssm_parameter" "database_url" {
-  name        = "/${var.project_name}/DATABASE_URL"
-  type        = "SecureString"
-  value       = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.this.address}:5432/${var.db_name}"
-  description = "Database connection string for the cafe app"
-  overwrite  = true
-}
-
 # Application Load Balancer
 module "alb" {
   source            = "./modules/alb"
