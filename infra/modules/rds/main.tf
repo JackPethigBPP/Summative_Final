@@ -4,6 +4,7 @@ variable "vpc_id" { type = string }
 variable "private_subnet_ids" { type = list(string) }
 variable "db_name" { type = string }
 variable "db_username" { type = string }
+variable "db_password" { type = string }
 variable "db_instance_class" { type = string }
 variable "db_allocated_storage" { type = number }
 variable "sg_ecs_id" { type = string }
@@ -38,16 +39,11 @@ resource "aws_security_group" "rds" {
   tags = { Name = "${var.project_name}-rds-sg" }
 }
 
-resource "random_password" "db" {
-  length           = 20
-  special          = true
-  override_special = "!#$%&()*+,-.:;<=>?[]^_{|}~"
-}
-
 resource "aws_db_instance" "this" {
   identifier = "${var.project_name}-db-${substr(var.vpc_id,0,8)}"
   lifecycle {
     create_before_destroy = true
+    ignore_changes = [password]
   }
   apply_immediately      = true
   engine                 = "postgres"
@@ -55,7 +51,7 @@ resource "aws_db_instance" "this" {
   allocated_storage      = var.db_allocated_storage
   db_name                = var.db_name
   username               = var.db_username
-  password               = random_password.db.result
+  password               = var.db_password
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   skip_final_snapshot    = true
