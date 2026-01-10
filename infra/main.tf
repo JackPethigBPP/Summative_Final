@@ -65,8 +65,8 @@ resource "aws_security_group" "app" {
   vpc_id = module.vpc.vpc_id
 
   ingress {
-    from_port       = var.container_port
-    to_port         = var.container_port
+    from_port       = 80
+    to_port         = 80
     protocol        = "tcp"
     security_groups = [module.alb.alb_sg_id] # only ALB SG allowed
   }
