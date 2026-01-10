@@ -1,6 +1,9 @@
 
 variable "project_name" { type = string }
-variable "region" { type = string }
+variable "region" { 
+  type = string 
+  default = "eu-north-1"
+}
 
 variable "vpc_cidr" { type = string }
 variable "public_subnet_cidrs" { type = list(string) }
