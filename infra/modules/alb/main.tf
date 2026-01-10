@@ -40,7 +40,7 @@ resource "aws_lb" "this" {
 
 resource "aws_lb_target_group" "tg" {
   name_prefix = var.project_name
-  port        = var.container_port
+  port        = 80
   protocol    = "HTTP"
   target_type = "instance"
   vpc_id      = var.vpc_id
