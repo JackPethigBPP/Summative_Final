@@ -46,6 +46,29 @@ module "rds" {
   sg_ecs_id            = aws_security_group.app.id
 }
 
+resource "aws_security_group" "rds" {
+  name   = "${var.project_name}-rds-sg"
+  vpc_id = module.vpc.vpc_id
+}
+
+resource "aws_security_group_rule" "rds_from_ec2" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.rds.id
+  source_security_group_id = aws_security_group.ec2_sg.id
+}
+
+# Create SecureString SSM parameter holding the full DATABASE_URL
+resource "aws_ssm_parameter" "database_url" {
+  name        = "/${var.project_name}/DATABASE_URL"
+  type        = "SecureString"
+  value       = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.this.address}:5432/${var.db_name}"
+  description = "Database connection string for the cafe app"
+  overwrite  = true
+}
+
 # Application Load Balancer
 module "alb" {
   source            = "./modules/alb"
@@ -97,6 +120,14 @@ data "aws_ami" "amazon_linux2" {
     name   = "name"
     values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
+}
+
+resource "aws_ssm_parameter" "database_url" {
+  count = var.enable_rds ? 1 : 0
+
+  name  = "/${var.project_name}/DATABASE_URL"
+  type  = "SecureString"
+  value = "postgres://${var.db_username}:${var.db_password}@${module.rds[0].endpoint}:5432/${var.db_name}"
 }
 
 # User data: install Docker, login to ECR, pull image, run container

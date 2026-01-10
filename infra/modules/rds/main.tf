@@ -45,6 +45,7 @@ resource "random_password" "db" {
 }
 
 resource "aws_db_instance" "this" {
+  count = var.enable_rds ? 1 : 0
   identifier = "${var.project_name}-db-${substr(var.vpc_id,0,8)}"
   lifecycle {
     create_before_destroy = true
@@ -63,15 +64,6 @@ resource "aws_db_instance" "this" {
   multi_az               = false
   storage_encrypted      = true
   tags                   = { Name = "${var.project_name}-rds" }
-}
-
-# Create SecureString SSM parameter holding the full DATABASE_URL
-resource "aws_ssm_parameter" "database_url" {
-  name        = "/${var.project_name}/DATABASE_URL"
-  type        = "SecureString"
-  value       = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.this.address}:5432/${var.db_name}"
-  description = "Database connection string for the cafe app"
-  overwrite  = true
 }
 
 output "endpoint" { value = aws_db_instance.this.address }

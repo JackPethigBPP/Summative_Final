@@ -9,8 +9,21 @@ variable "vpc_cidr" { type = string }
 variable "public_subnet_cidrs" { type = list(string) }
 variable "private_subnet_cidrs" { type = list(string) }
 
-variable "db_name" { type = string }
-variable "db_username" { type = string }
+variable "db_name" { 
+  type = string 
+  default = null 
+}
+
+variable "db_username" { 
+  type = string 
+  default = null
+}
+
+variable "db_password" {
+  type      = string
+  sensitive = true
+  default   = null
+}
 
 variable "db_instance_class" {
   type    = string
@@ -24,7 +37,7 @@ variable "db_allocated_storage" {
 variable "enable_rds" {
   type = bool
   description = "Whether to create the RDS instance"
-  default = false
+  default = true
 }
 
 variable "desired_count" {
@@ -39,5 +52,11 @@ variable "container_port" {
   description = "Port exposed by the application container"
   type        = number
   default     = 80
+}
+
+variable "database_url" {
+  description = "Database connection string for the Cafe app"
+  type = string
+  sensitive = true
 }
 
