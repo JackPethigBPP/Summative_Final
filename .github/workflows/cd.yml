@@ -20,6 +20,8 @@ concurrency:
 env:
   AWS_REGION: eu-north-1
   PROJECT_NAME: cafe
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
 
 jobs:
   build-test-push-and-deploy:
@@ -187,26 +189,26 @@ jobs:
           set -e
           ROLE_NAME="${{ env.PROJECT_NAME }}-ec2-role"
           PROFILE_NAME="${{ env.PROJECT_NAME }}-ec2-profile"
+          VARS="-var-file=env/dev.tfvars -var=image_tag=${{ steps.vars.outputs.sha }}"
 
           # Role
           if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
             terraform state show aws_iam_role.ec2_role >/dev/null 2>&1 || \
-            terraform import aws_iam_role.ec2_role "$ROLE_NAME"
+            terraform import $VARS aws_iam_role.ec2_role "$ROLE_NAME"
           fi
 
           # Instance profile
           if aws iam get-instance-profile --instance-profile-name "$PROFILE_NAME" >/dev/null 2>&1; then
             terraform state show aws_iam_instance_profile.ec2_profile >/dev/null 2>&1 || \
-            terraform import aws_iam_instance_profile.ec2_profile "$PROFILE_NAME"
+            terraform import $VARS aws_iam_instance_profile.ec2_profile "$PROFILE_NAME"
           fi
 
           # Attachments (import id = ROLE_NAME/POLICY_ARN)
           terraform state show aws_iam_role_policy_attachment.ec2_readonly >/dev/null 2>&1 || \
-          terraform import aws_iam_role_policy_attachment.ec2_readonly "$ROLE_NAME/arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly" || true
+          terraform import $VARS aws_iam_role_policy_attachment.ec2_readonly "$ROLE_NAME/arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly" || true
 
           terraform state show aws_iam_role_policy_attachment.ssm_readonly >/dev/null 2>&1 || \
-          terraform import aws_iam_role_policy_attachment.ssm_readonly "$ROLE_NAME/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" || true
-
+          terraform import $VARS aws_iam_role_policy_attachment.ssm_readonly "$ROLE_NAME/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" || true
       
       - name: Check S3 state object
         run: |
