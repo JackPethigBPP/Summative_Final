@@ -53,10 +53,3 @@ variable "container_port" {
   type        = number
   default     = 80
 }
-
-variable "database_url" {
-  description = "Database connection string for the Cafe app"
-  type = string
-  sensitive = true
-}
-
