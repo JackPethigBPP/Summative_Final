@@ -41,7 +41,6 @@ jobs:
       - name: Who am I (AWS STS)
         run: |
           aws sts get-caller-identity
-          aws configure get region
 
       - name: Compute backend names
         id: acct
