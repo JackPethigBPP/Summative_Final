@@ -18,6 +18,12 @@ variable "db_allocated_storage" {
   default = 20
 }
 
+variable "enable_rds" {
+  type = bool
+  description = "Whether to create the RDS instance"
+  default = false
+}
+
 variable "desired_count" {
   type    = number
   default = 1
