@@ -204,11 +204,25 @@ jobs:
           fi
 
           # Attachments (import id = ROLE_NAME/POLICY_ARN)
-          terraform state show aws_iam_role_policy_attachment.ec2_readonly >/dev/null 2>&1 || \
-          terraform import $VARS aws_iam_role_policy_attachment.ec2_readonly "$ROLE_NAME/arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly" || true
+          if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+            ECR_POLICY_ARN="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+            SSM_POLICY_ARN="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 
-          terraform state show aws_iam_role_policy_attachment.ssm_readonly >/dev/null 2>&1 || \
-          terraform import $VARS aws_iam_role_policy_attachment.ssm_readonly "$ROLE_NAME/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" || true
+            attached_policies=$(aws iam list-attached-role-policies \
+              --role-name "$ROLE_NAME" \
+              --query 'AttachedPolicies[].PolicyArn' \
+              --output text)
+
+            if echo "$attached_policies" | grep -q "$ECR_POLICY_ARN"; then
+              terraform state show aws_iam_role_policy_attachment.ec2_readonly >/dev/null 2>&1 || \
+              terraform import $VARS aws_iam_role_policy_attachment.ec2_readonly "$ROLE_NAME/$ECR_POLICY_ARN"
+            fi
+
+            if echo "$attached_policies" | grep -q "$SSM_POLICY_ARN"; then
+              terraform state show aws_iam_role_policy_attachment.ssm_readonly >/dev/null 2>&1 || \
+              terraform import $VARS aws_iam_role_policy_attachment.ssm_readonly "$ROLE_NAME/$SSM_POLICY_ARN"
+            fi
+          fi
       
       - name: Check S3 state object
         run: |
