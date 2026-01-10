@@ -38,6 +38,6 @@ variable "image_tag" {
 variable "container_port" {
   description = "Port exposed by the application container"
   type        = number
-  default     = 5000
+  default     = 80
 }
 
