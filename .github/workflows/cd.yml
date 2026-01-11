@@ -170,7 +170,7 @@ jobs:
           echo "==== state list count ===="
           terraform state list || echo "NO_STATE"
 
-      - name: Import existing RDS security group (idempotent)
+      - name: Import existing RDS security group (hard guaranteed)
         working-directory: infra
         run: |
           set -e
@@ -179,56 +179,47 @@ jobs:
           TF_ADDR='module.rds[0].aws_security_group.rds'
           VARS=( -var-file=env/dev.tfvars -var="image_tag=${{ steps.vars.outputs.sha }}" )
 
-          # More tolerant check (handles enable_rds=true or enable_rds = true)
+          # Enable check (tolerant)
           if ! grep -Eq '^\s*enable_rds\s*=\s*true\b' env/dev.tfvars; then
             echo "enable_rds is not true; skipping RDS SG import."
             exit 0
           fi
 
-          # Find the VPC ID by Name tag
           VPC_ID="$(aws ec2 describe-vpcs \
             --region "$AWS_REGION" \
             --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
             --query "Vpcs[0].VpcId" \
-            --output text 2>/dev/null || true)"
+            --output text)"
 
-          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
-            echo "ERROR: Could not find VPC tagged Name=${PROJECT_NAME}-vpc"
-            exit 1
-          fi
+          echo "VPC_ID=$VPC_ID"
 
-          # Find the SG by name AND vpc-id
           SG_ID="$(aws ec2 describe-security-groups \
             --region "$AWS_REGION" \
             --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=${PROJECT_NAME}-rds-sg" \
             --query "SecurityGroups[0].GroupId" \
-            --output text 2>/dev/null || true)"
+            --output text)"
 
-          if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
-            echo "No SG found; Terraform will create it."
-            exit 0
-          fi
+          echo "SG_ID=$SG_ID"
 
-          echo "Found existing SG ${PROJECT_NAME}-rds-sg in $VPC_ID -> $SG_ID"
-
-          echo "==== Debug: does address exist in state? ===="
-          terraform state list | grep -F "$TF_ADDR" || echo "Not in state: $TF_ADDR"
-
-          # If present in state, ensure it maps to the same SG id; otherwise replace it
-          if terraform state show "$TF_ADDR" >/dev/null 2>&1; then
-            CURRENT_ID="$(terraform state show "$TF_ADDR" | awk '/^id\s+=\s+/{print $3; exit}' || true)"
-            echo "State currently has id=$CURRENT_ID for $TF_ADDR"
-
-            if [ -n "$CURRENT_ID" ] && [ "$CURRENT_ID" != "$SG_ID" ]; then
-              echo "State has different SG ($CURRENT_ID) than AWS ($SG_ID). Fixing state..."
-              terraform state rm "$TF_ADDR"
-              terraform import -lock-timeout=5m "${VARS[@]}" "$TF_ADDR" "$SG_ID"
-            else
-              echo "Correct SG already in state: $TF_ADDR"
-            fi
-          else
+          # If Terraform doesn't have it, import it
+          if ! terraform state show "$TF_ADDR" >/dev/null 2>&1; then
+            echo "Importing $TF_ADDR -> $SG_ID"
             terraform import -lock-timeout=5m "${VARS[@]}" "$TF_ADDR" "$SG_ID"
+          else
+            echo "Already in state: $TF_ADDR"
           fi
+
+          # Prove it
+          terraform state show "$TF_ADDR" | awk 'NR<=40{print}'
+
+      - name: Verify RDS SG is in Terraform state (fail fast)
+        working-directory: infra
+        run: |
+          set -e
+          TF_ADDR='module.rds[0].aws_security_group.rds'
+          echo "Checking state for: $TF_ADDR"
+          terraform state list | grep -F "$TF_ADDR"
+          terraform state show "$TF_ADDR" | sed -n '1,60p'
 
       - name: Import RDS subnet group if it exists (idempotent)
         working-directory: infra
@@ -341,7 +332,7 @@ jobs:
       
       - name: Check S3 state object
         run: |
-          aws s3 ls "s3://${{ steps.acct.outputs.BUCKET }}/infra/terraform.tfstate" || true
+          aws s3 ls "s3://${{ steps.acct.outputs.BUCKET }}/infra/${{ env.AWS_REGION }}/terraform.tfstate" || true
           echo "Listing bucket root:"
           aws s3 ls "s3://${{ steps.acct.outputs.BUCKET }}/" || true
 
