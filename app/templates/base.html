@@ -4,16 +4,37 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cafe Demo</title>
+  <title>Cafe Ops</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <nav>
-    <a href="/cashier">Cashier</a>
-    <a href="/barista">Barista</a>
-  </nav>
-  <main>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">☕</div>
+        <div class="brand-text">
+          <div class="brand-title">Cafe Ops</div>
+          <div class="brand-subtitle">Orders • Queue • Status</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a class="nav-link" href="/cashier">Cashier</a>
+        <a class="nav-link" href="/barista">Barista</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container page">
     {% block content %}{% endblock %}
   </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>Deployed via Terraform + Docker on AWS</span>
+      <span class="dot">•</span>
+      <span class="muted">Health: <code>/healthz</code></span>
+    </div>
+  </footer>
 </body>
 </html>

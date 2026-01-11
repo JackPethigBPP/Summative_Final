@@ -120,7 +120,7 @@ resource "aws_ssm_parameter" "database_url" {
 
   name  = "/${var.project_name}/DATABASE_URL"
   type  = "SecureString"
-  value = "postgres://${var.db_username}:${var.db_password}@${module.rds[0].endpoint}:5432/${var.db_name}"
+  value = "postgresql://${var.db_username}:${var.db_password}@${module.rds[0].endpoint}:5432/${var.db_name}"
 }
 
 # User data: install Docker, login to ECR, pull image, run container

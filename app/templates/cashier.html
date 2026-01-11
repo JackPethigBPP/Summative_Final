@@ -1,37 +1,85 @@
 
 {% extends 'base.html' %}
 {% block content %}
-<h2>Cashier</h2>
-<form method="POST">
-  <label>Customer Name</label><br />
-  <input name="customer_name" placeholder="e.g. Alex" />
-  <label>Drink</label><br />
-  <input name="drink" placeholder="e.g. Latte" />
-  <label>Size</label><br />
-  <select name="size">
-    <option>Small</option>
-    <option>Medium</option>
-    <option>Large</option>
-  </select>
-  <label>Notes</label><br />
-  <textarea name="notes" placeholder="e.g. Oat milk"></textarea>
-  <button type="submit">Create Order</button>
-</form>
+<div class="page-head">
+  <div>
+    <h1>Cashier</h1>
+    <p class="lead">Create a new order and keep an eye on what’s coming through.</p>
+  </div>
+  <div class="pill">Tip: Add notes for alternative milk, decaf, extra shot…</div>
+</div>
 
-<h3>Recent Orders</h3>
-<table class="table">
-  <thead><tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th>Created</th></tr></thead>
-  <tbody>
-  {% for o in orders %}
-    <tr>
-      <td>{{ o.id }}</td>
-      <td>{{ o.customer_name }}</td>
-      <td>{{ o.drink }}</td>
-      <td>{{ o.size }}</td>
-      <td><span class="badge {{ o.status.value }}">{{ o.status.value }}</span></td>
-      <td>{{ o.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<section class="grid">
+  <div class="card">
+    <div class="card-head">
+      <h2 class="card-title">New Order</h2>
+      <span class="muted">All fields optional, but customer + drink is ideal.</span>
+    </div>
+
+    <form method="POST" class="form">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="customer_name">Customer</label>
+          <input id="customer_name" name="customer_name" placeholder="e.g. Alex" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label for="drink">Drink</label>
+          <input id="drink" name="drink" placeholder="e.g. Latte" autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="size">Size</label>
+          <select id="size" name="size">
+            <option>Small</option>
+            <option selected>Medium</option>
+            <option>Large</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="notes">Notes</label>
+          <textarea id="notes" name="notes" placeholder="e.g. Oat milk, 1 sugar, extra hot"></textarea>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Create Order</button>
+        <span class="muted">Orders appear instantly in the Barista queue.</span>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2 class="card-title">Recent Orders</h2>
+      <span class="muted">Newest first</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+        {% if orders|length == 0 %}
+          <tr>
+            <td colspan="6" class="empty">No orders yet — create the first one 👆</td>
+          </tr>
+        {% endif %}
+        {% for o in orders %}
+          <tr>
+            <td class="mono">{{ o.id }}</td>
+            <td>{{ o.customer_name }}</td>
+            <td>{{ o.drink }}</td>
+            <td>{{ o.size }}</td>
+            <td><span class="badge badge-{{ o.status.value }}">{{ o.status.value }}</span></td>
+            <td class="muted">{{ o.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
 {% endblock %}

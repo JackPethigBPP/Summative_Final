@@ -1,50 +1,89 @@
 
 {% extends 'base.html' %}
 {% block content %}
-<h2>Barista</h2>
-<h3>Queue</h3>
-<table class="table">
-  <thead><tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
-  <tbody>
-  {% for o in queue %}
-    <tr>
-      <td>{{ o.id }}</td>
-      <td>{{ o.customer_name }}</td>
-      <td>{{ o.drink }}</td>
-      <td>{{ o.size }}</td>
-      <td><span class="badge {{ o.status.value }}">{{ o.status.value }}</span></td>
-      <td>
-        {% if o.status.value == 'NEW' %}
-          <form method="POST" action="/barista/update/{{ o.id }}/IN_PROGRESS">
-            <button type="submit">Start</button>
-          </form>
-        {% elif o.status.value == 'IN_PROGRESS' %}
-          <form method="POST" action="/barista/update/{{ o.id }}/DONE">
-            <button type="submit">Complete</button>
-          </form>
-        {% else %}
-          <em>—</em>
-        {% endif %}
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="page-head">
+  <div>
+    <h1>Barista</h1>
+    <p class="lead">Work the queue: start drinks, mark them complete, keep things moving.</p>
+  </div>
+  <div class="pill">Tip: Use <span class="mono">Start</span> → <span class="mono">Complete</span> to advance status.</div>
+</div>
 
-<h3>Recently Completed</h3>
-<table class="table">
-  <thead><tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th>Completed</th></tr></thead>
-  <tbody>
-  {% for o in done %}
-    <tr>
-      <td>{{ o.id }}</td>
-      <td>{{ o.customer_name }}</td>
-      <td>{{ o.drink }}</td>
-      <td>{{ o.size }}</td>
-      <td><span class="badge {{ o.status.value }}">{{ o.status.value }}</span></td>
-      <td>{{ o.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<section class="grid">
+  <div class="card">
+    <div class="card-head">
+      <h2 class="card-title">Queue</h2>
+      <span class="muted">Orders awaiting prep</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th class="right">Action</th></tr>
+        </thead>
+        <tbody>
+        {% if queue|length == 0 %}
+          <tr>
+            <td colspan="6" class="empty">Queue is empty — enjoy the calm 😌</td>
+          </tr>
+        {% endif %}
+        {% for o in queue %}
+          <tr>
+            <td class="mono">{{ o.id }}</td>
+            <td>{{ o.customer_name }}</td>
+            <td>{{ o.drink }}</td>
+            <td>{{ o.size }}</td>
+            <td><span class="badge badge-{{ o.status.value }}">{{ o.status.value }}</span></td>
+            <td class="right">
+              {% if o.status.value == 'NEW' %}
+                <form method="POST" action="/barista/update/{{ o.id }}/IN_PROGRESS" class="inline">
+                  <button class="btn btn-ghost" type="submit">Start</button>
+                </form>
+              {% elif o.status.value == 'IN_PROGRESS' %}
+                <form method="POST" action="/barista/update/{{ o.id }}/DONE" class="inline">
+                  <button class="btn btn-primary" type="submit">Complete</button>
+                </form>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2 class="card-title">Recently Completed</h2>
+      <span class="muted">Latest finished drinks</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>ID</th><th>Customer</th><th>Drink</th><th>Size</th><th>Status</th><th>Completed</th></tr>
+        </thead>
+        <tbody>
+        {% if done|length == 0 %}
+          <tr>
+            <td colspan="6" class="empty">Nothing completed yet.</td>
+          </tr>
+        {% endif %}
+        {% for o in done %}
+          <tr>
+            <td class="mono">{{ o.id }}</td>
+            <td>{{ o.customer_name }}</td>
+            <td>{{ o.drink }}</td>
+            <td>{{ o.size }}</td>
+            <td><span class="badge badge-{{ o.status.value }}">{{ o.status.value }}</span></td>
+            <td class="muted">{{ o.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
 {% endblock %}
