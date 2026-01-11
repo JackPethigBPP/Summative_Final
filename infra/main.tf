@@ -157,10 +157,10 @@ locals {
 
     # --- Port mapping defaults ---
     # Host port = ALB / instance port (default 80)
-    HOST_PORT="$${HOST_PORT:-80}"
+    HOST_PORT="80"
 
     # Container port = Flask/Gunicorn internal port (default 5000)
-    CONTAINER_PORT="$${CONTAINER_PORT:-5000}"
+    CONTAINER_PORT="5000"
 
     echo "Using HOST_PORT=$${HOST_PORT} -> CONTAINER_PORT=$${CONTAINER_PORT}"
 
