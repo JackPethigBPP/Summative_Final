@@ -405,6 +405,44 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Start ASG Instance Refresh (roll out newest image)
+        working-directory: infra
+        run: |
+          set -e
+          ASG_NAME="$(terraform output -raw asg_name)"
+          echo "Starting instance refresh for ASG: $ASG_NAME"
+
+          REFRESH_ID="$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --preferences MinHealthyPercentage=50,InstanceWarmup=120 \
+            --query 'InstanceRefreshId' --output text \
+            --region "${{ env.AWS_REGION }}")"
+
+          echo "Instance refresh started: $REFRESH_ID"
+
+          while true; do
+            STATUS="$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG_NAME" \
+              --instance-refresh-ids "$REFRESH_ID" \
+              --query 'InstanceRefreshes[0].Status' --output text \
+              --region "${{ env.AWS_REGION }}")"
+
+            echo "Refresh status: $STATUS"
+            if [ "$STATUS" = "Successful" ]; then
+              echo "Instance refresh complete."
+              break
+            fi
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "Instance refresh did not complete successfully (status=$STATUS)."
+              aws autoscaling describe-instance-refreshes \
+                --auto-scaling-group-name "$ASG_NAME" \
+                --instance-refresh-ids "$REFRESH_ID" \
+                --region "${{ env.AWS_REGION }}"
+              exit 1
+            fi
+            sleep 20
+          done
+
       - name: Terraform outputs (ALB DNS)
         working-directory: infra
         run: |
