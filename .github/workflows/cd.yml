@@ -178,7 +178,7 @@ jobs:
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
           SG_NAME="${PROJECT_NAME}-rds-sg"
           TF_ADDR='module.rds[0].aws_security_group.rds'
-          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
+          VARS=( -var-file=env/dev.tfvars -var="image_tag=${{ steps.vars.outputs.sha }}" )
 
           if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
             echo "enable_rds is not true; skipping RDS SG import."
@@ -194,7 +194,7 @@ jobs:
           if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
             echo "Found existing SG $SG_NAME -> $SG_ID"
             terraform state show "$TF_ADDR" >/dev/null 2>&1 || \
-              terraform import -lock-timeout=5m $VARS "$TF_ADDR" "$SG_ID"
+              terraform import -lock-timeout=5m "${VARS[@]}" "$TF_ADDR" "$SG_ID"
           else
             echo "No SG named $SG_NAME found; Terraform will create it."
           fi
@@ -205,7 +205,7 @@ jobs:
           set -e
           AWS_REGION="${{ env.AWS_REGION }}"
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
-          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
+          VARS=( -var-file=env/dev.tfvars -var="image_tag=${{ steps.vars.outputs.sha }}" )
 
           if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
             echo "enable_rds is not true; skipping subnet group import."
@@ -230,7 +230,7 @@ jobs:
           if aws rds describe-db-subnet-groups --region "$AWS_REGION" --db-subnet-group-name "$SUBNET_GROUP_NAME" >/dev/null 2>&1; then
             echo "Subnet group exists in AWS: $SUBNET_GROUP_NAME"
             terraform state show 'module.rds[0].aws_db_subnet_group.this' >/dev/null 2>&1 || \
-              terraform import $VARS 'module.rds[0].aws_db_subnet_group.this' "$SUBNET_GROUP_NAME"
+              terraform import "${VARS[@]}" 'module.rds[0].aws_db_subnet_group.this' "$SUBNET_GROUP_NAME"
           else
             echo "Subnet group not found; Terraform will create it."
           fi
@@ -241,7 +241,7 @@ jobs:
           set -e
           AWS_REGION="${{ env.AWS_REGION }}"
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
-          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
+          VARS=( -var-file=env/dev.tfvars -var="image_tag=${{ steps.vars.outputs.sha }}" )
 
           if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
             echo "enable_rds is not true; skipping DB instance import."
@@ -265,7 +265,7 @@ jobs:
           if aws rds describe-db-instances --region "$AWS_REGION" --db-instance-identifier "$DB_ID" >/dev/null 2>&1; then
             echo "DB instance exists in AWS: $DB_ID"
             terraform state show 'module.rds[0].aws_db_instance.this' >/dev/null 2>&1 || \
-              terraform import $VARS 'module.rds[0].aws_db_instance.this' "$DB_ID"
+              terraform import "${VARS[@]}" 'module.rds[0].aws_db_instance.this' "$DB_ID"
           else
             echo "DB instance not found; Terraform will create it."
           fi
@@ -276,16 +276,16 @@ jobs:
           set -e
           ROLE_NAME="${{ env.PROJECT_NAME }}-ec2-role"
           PROFILE_NAME="${{ env.PROJECT_NAME }}-ec2-profile"
-          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
+          VARS=( -var-file=env/dev.tfvars -var="image_tag=${{ steps.vars.outputs.sha }}" )
 
           if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
             terraform state show aws_iam_role.ec2_role >/dev/null 2>&1 || \
-            terraform import $VARS aws_iam_role.ec2_role "$ROLE_NAME"
+            terraform import "${VARS[@]}" aws_iam_role.ec2_role "$ROLE_NAME"
           fi
 
           if aws iam get-instance-profile --instance-profile-name "$PROFILE_NAME" >/dev/null 2>&1; then
             terraform state show aws_iam_instance_profile.ec2_profile >/dev/null 2>&1 || \
-            terraform import $VARS aws_iam_instance_profile.ec2_profile "$PROFILE_NAME"
+            terraform import "${VARS[@]}" aws_iam_instance_profile.ec2_profile "$PROFILE_NAME"
           fi
 
           if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
@@ -299,12 +299,12 @@ jobs:
 
             if echo "$attached_policies" | grep -q "$ECR_POLICY_ARN"; then
               terraform state show aws_iam_role_policy_attachment.ec2_readonly >/dev/null 2>&1 || \
-              terraform import $VARS aws_iam_role_policy_attachment.ec2_readonly "$ROLE_NAME/$ECR_POLICY_ARN"
+              terraform import "${VARS[@]}" aws_iam_role_policy_attachment.ec2_readonly "$ROLE_NAME/$ECR_POLICY_ARN"
             fi
 
             if echo "$attached_policies" | grep -q "$SSM_POLICY_ARN"; then
               terraform state show aws_iam_role_policy_attachment.ssm_readonly >/dev/null 2>&1 || \
-              terraform import $VARS aws_iam_role_policy_attachment.ssm_readonly "$ROLE_NAME/$SSM_POLICY_ARN"
+              terraform import "${VARS[@]}" aws_iam_role_policy_attachment.ssm_readonly "$ROLE_NAME/$SSM_POLICY_ARN"
             fi
           fi
       
@@ -320,7 +320,7 @@ jobs:
           set -e
           REPO_NAME="${{ env.PROJECT_NAME }}-repo"
           TF_ADDR="module.ecr.aws_ecr_repository.repo"
-          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
+          VARS=( -var-file=env/dev.tfvars -var="image_tag=${{ steps.vars.outputs.sha }}" )
 
           if aws ecr describe-repositories --region ${{ env.AWS_REGION }} --repository-names "$REPO_NAME" >/dev/null 2>&1; then
             echo "ECR repo exists in AWS: $REPO_NAME"
@@ -328,7 +328,7 @@ jobs:
               echo "Repo already in Terraform state: $TF_ADDR"
             else
               echo "Importing $REPO_NAME into state at $TF_ADDR"
-              terraform import -input=false $VARS "$TF_ADDR" "$REPO_NAME"
+              terraform import -input=false "${VARS[@]}" "$TF_ADDR" "$REPO_NAME"
             fi
           else
             echo "ECR repo not found; Terraform will create it."
