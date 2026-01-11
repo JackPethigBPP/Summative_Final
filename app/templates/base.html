@@ -34,6 +34,9 @@
       <span>Deployed via Terraform + Docker on AWS</span>
       <span class="dot">•</span>
       <span class="muted">Health: <code>/healthz</code></span>
+      <span class="dot">•</span>
+      <span class="muted">Build: <code>{{ app_version }}</code>{% if app_build_time %} <span class="muted">({{ app_build_time }})</span>{% endif %}</span>
+
     </div>
   </footer>
 </body>

@@ -1,0 +1,50 @@
+
+import os
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from .config import Config
+
+db = SQLAlchemy()
+
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
+
+    @app.route("/healthz", methods=["GET"])
+    def healthz():
+        return "OK", 200
+
+    db.init_app(app)
+
+    # Ensure tables exist
+    with app.app_context():
+        try:
+            from . import models  # noqa
+            db.create_all()
+        except Exception as e:
+            print(f"WARNING: db.create_all() failed at startup: {e}")
+
+    # Blueprints
+    from .cashier.routes import cashier_bp
+    from .barista.routes import barista_bp
+    from .api.routes import api_bp
+    app.register_blueprint(cashier_bp)
+    app.register_blueprint(barista_bp)
+    app.register_blueprint(api_bp, url_prefix="/api")
+
+    @app.route("/")
+    def index():
+        from flask import redirect, url_for
+        return redirect(url_for("cashier.cashier"))
+
+
+
+@app.context_processor
+def inject_build_info():
+    # Populated at build time by the CI/CD pipeline (see Dockerfile + GitHub Actions).
+    return {
+        "app_version": os.getenv("APP_VERSION", "dev"),
+        "app_build_time": os.getenv("APP_BUILD_TIME", ""),
+    }
+    return app
