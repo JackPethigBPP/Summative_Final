@@ -138,7 +138,7 @@ locals {
     systemctl enable docker
     systemctl start docker
 
-    # Ensure ec2-user can use docker (not strictly required for root scripts)
+    # Allow ec2-user to run docker (harmless for root scripts)
     usermod -aG docker ec2-user || true
 
     # ----------------------------
@@ -154,7 +154,15 @@ locals {
     ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
     REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
     IMAGE="${module.ecr.repository_url}:${var.image_tag}"
-    PORT="$${PORT:-80}"
+
+    # --- Port mapping defaults ---
+    # Host port = ALB / instance port (default 80)
+    HOST_PORT="$${HOST_PORT:-80}"
+
+    # Container port = Flask/Gunicorn internal port (default 5000)
+    CONTAINER_PORT="$${CONTAINER_PORT:-5000}"
+
+    echo "Using HOST_PORT=$${HOST_PORT} -> CONTAINER_PORT=$${CONTAINER_PORT}"
 
     aws ecr get-login-password --region "$REGION" | \
       docker login --username AWS --password-stdin "$REGISTRY"
@@ -164,14 +172,14 @@ locals {
     # ----------------------------
     # Read DATABASE_URL from SSM
     # ----------------------------
-    DB_URL="$(aws ssm get-parameter \
+    DATABASE_URL="$(aws ssm get-parameter \
       --name "/${var.project_name}/DATABASE_URL" \
       --with-decryption \
       --region "$REGION" \
       --query 'Parameter.Value' \
       --output text || true)"
 
-    if [ -z "$DB_URL" ] || [ "$DB_URL" = "None" ]; then
+    if [ -z "$DATABASE_URL" ] || [ "$DATABASE_URL" = "None" ]; then
       echo "WARNING: SSM /${var.project_name}/DATABASE_URL empty or missing" >&2
     fi
 
@@ -180,29 +188,30 @@ locals {
     # ----------------------------
     docker rm -f cafe-app >/dev/null 2>&1 || true
 
-    # If your app listens on PORT inside the container, pick a sane default:
-    # Flask default is often 5000; many containers use 8000. Choose what your app uses.
-    PORT="$${PORT:=5000}"
-
     # Build env flags (only include DATABASE_URL if present)
-    ENV_ARGS="-e PORT=$PORT"
-    if [ -n "$DB_URL" ] && [ "$DB_URL" != "None" ]; then
-      ENV_ARGS="$ENV_ARGS -e DATABASE_URL=$DB_URL"
+    ENV_ARGS="-e PORT=$${CONTAINER_PORT} -e FLASK_ENV=production -e FLASK_DEBUG=0"
+    if [ -n "$DATABASE_URL" ] && [ "$DATABASE_URL" != "None" ]; then
+      ENV_ARGS="$ENV_ARGS -e DATABASE_URL=$DATABASE_URL"
     fi
 
-    docker run -d --name cafe-app --restart unless-stopped \
-      -p 80:$${PORT} \
-      -e PORT=$${PORT} \
-      $ENV_ARGS \
-      -e FLASK_ENV=production \
-      -e FLASK_DEBUG=0 \
+    docker run -d --name cafe-app \
+      --restart unless-stopped \
+      -p $${HOST_PORT}:$${CONTAINER_PORT} \
+      $${ENV_ARGS} \
       "$IMAGE"
 
+    # ----------------------------
+    # Verify container health
+    # ----------------------------
     sleep 3
     docker ps --filter "name=cafe-app" --format "{{.Names}}" | grep -q cafe-app
-    curl -fsS "http://localhost/healthz"
+
+    # Health check must hit HOST port
+    curl -fsS "http://localhost:$${HOST_PORT}/healthz"
+
   EOT
 }
+
 
 # Launch template (attach LabInstanceProfile -> LabRole)
 resource "aws_launch_template" "app" {

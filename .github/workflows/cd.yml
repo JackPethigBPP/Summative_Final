@@ -1,10 +1,8 @@
-
 name: CD
 
 on:
   push:
     branches: [ "main" ]
-    # Prevent self-trigger from any generated/transient files, just in case
     paths-ignore:
       - 'infra/backend.hcl'
       - '**/*.tfstate*'
@@ -12,7 +10,6 @@ on:
       - '**/.terraform/**'
   workflow_dispatch: {}
 
-# Prevent parallel runs on the same branch and auto-cancel older runs
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: true
@@ -25,9 +22,7 @@ env:
 
 jobs:
   build-test-push-and-deploy:
-    # Safety net: never run forever
     timeout-minutes: 60
-    # Extra guard: do not run if the actor is the bot (prevents “self-push” loops)
     if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
 
@@ -41,7 +36,6 @@ jobs:
       - name: Set up Docker Buildx (multi-arch)
         uses: docker/setup-buildx-action@v3
 
-      # 1) Configure AWS creds (Learner Lab secrets must be fresh)
       - name: Configure AWS credentials (temporary secrets)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -49,7 +43,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ env.AWS_REGION }}
 
-      # 2) Preflight sanity (fail fast on bad creds or DNS/egress)
       - name: Who am I (AWS STS)
         run: aws sts get-caller-identity
 
@@ -64,7 +57,6 @@ jobs:
               print(host, "->", socket.gethostbyname(host))
           PY
 
-      # 3) Compute backend names (per-account S3 + DynamoDB)
       - name: Compute backend names
         id: acct
         run: |
@@ -73,7 +65,6 @@ jobs:
           echo "BUCKET=${{ env.PROJECT_NAME }}-tfstate-${ACCOUNT_ID}" >> $GITHUB_OUTPUT
           echo "LOCK_TABLE=${{ env.PROJECT_NAME }}-tf-lock" >> $GITHUB_OUTPUT
 
-      # 4) Ensure backend exists (idempotent; no commits)
       - name: Ensure backend S3 bucket exists
         run: |
           set -e
@@ -119,16 +110,13 @@ jobs:
           encrypt        = true
           EOF
 
-      # 5) Login to ECR
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 6) Compute image tag = Git SHA
       - name: Compute image tag
         id: vars
         run: echo "sha=${GITHUB_SHA}" >> $GITHUB_OUTPUT
 
-      # 7) Try build & push (skip if repo not yet created; TF will create it)
       - name: Try build & push (skip on first run if repo missing)
         id: prepush
         env:
@@ -157,7 +145,6 @@ jobs:
           tags: |
             ${{ steps.prepush.outputs.repo_uri }}:${{ steps.vars.outputs.sha }}
 
-      # 8) Terraform (remote backend)
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -182,7 +169,7 @@ jobs:
           terraform workspace show || true
           echo "==== state list count ===="
           terraform state list || echo "NO_STATE"
-      
+
       - name: Import existing RDS security group (idempotent)
         working-directory: infra
         run: |
@@ -191,14 +178,13 @@ jobs:
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
           SG_NAME="${PROJECT_NAME}-rds-sg"
           TF_ADDR='module.rds[0].aws_security_group.rds'
+          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
 
-          # Only if RDS is enabled
           if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
             echo "enable_rds is not true; skipping RDS SG import."
             exit 0
           fi
 
-          # Find SG by name (no terraform outputs needed)
           SG_ID="$(aws ec2 describe-security-groups \
             --region "$AWS_REGION" \
             --filters "Name=group-name,Values=$SG_NAME" \
@@ -208,7 +194,7 @@ jobs:
           if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
             echo "Found existing SG $SG_NAME -> $SG_ID"
             terraform state show "$TF_ADDR" >/dev/null 2>&1 || \
-              terraform import -lock-timeout=5m "$TF_ADDR" "$SG_ID"
+              terraform import -lock-timeout=5m $VARS "$TF_ADDR" "$SG_ID"
           else
             echo "No SG named $SG_NAME found; Terraform will create it."
           fi
@@ -219,15 +205,22 @@ jobs:
           set -e
           AWS_REGION="${{ env.AWS_REGION }}"
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
+          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
 
           if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
             echo "enable_rds is not true; skipping subnet group import."
             exit 0
           fi
 
-          VPC_ID="$(terraform output -raw vpc_id 2>/dev/null || true)"
-          if [ -z "$VPC_ID" ]; then
-            echo "ERROR: terraform output vpc_id not found. Add output \"vpc_id\" in infra/outputs.tf"
+          # Look up VPC ID by tag Name="${project_name}-vpc" (matches your vpc module tags)
+          VPC_ID="$(aws ec2 describe-vpcs \
+            --region "$AWS_REGION" \
+            --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
+            --query "Vpcs[0].VpcId" \
+            --output text 2>/dev/null || true)"
+
+          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "ERROR: Could not find VPC tagged Name=${PROJECT_NAME}-vpc"
             exit 1
           fi
 
@@ -237,7 +230,7 @@ jobs:
           if aws rds describe-db-subnet-groups --region "$AWS_REGION" --db-subnet-group-name "$SUBNET_GROUP_NAME" >/dev/null 2>&1; then
             echo "Subnet group exists in AWS: $SUBNET_GROUP_NAME"
             terraform state show 'module.rds[0].aws_db_subnet_group.this' >/dev/null 2>&1 || \
-              terraform import 'module.rds[0].aws_db_subnet_group.this' "$SUBNET_GROUP_NAME"
+              terraform import $VARS 'module.rds[0].aws_db_subnet_group.this' "$SUBNET_GROUP_NAME"
           else
             echo "Subnet group not found; Terraform will create it."
           fi
@@ -248,15 +241,21 @@ jobs:
           set -e
           AWS_REGION="${{ env.AWS_REGION }}"
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
+          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
 
           if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
             echo "enable_rds is not true; skipping DB instance import."
             exit 0
           fi
 
-          VPC_ID="$(terraform output -raw vpc_id 2>/dev/null || true)"
-          if [ -z "$VPC_ID" ]; then
-            echo "ERROR: terraform output vpc_id not found. Add output \"vpc_id\" in infra/outputs.tf"
+          VPC_ID="$(aws ec2 describe-vpcs \
+            --region "$AWS_REGION" \
+            --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
+            --query "Vpcs[0].VpcId" \
+            --output text 2>/dev/null || true)"
+
+          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "ERROR: Could not find VPC tagged Name=${PROJECT_NAME}-vpc"
             exit 1
           fi
 
@@ -266,7 +265,7 @@ jobs:
           if aws rds describe-db-instances --region "$AWS_REGION" --db-instance-identifier "$DB_ID" >/dev/null 2>&1; then
             echo "DB instance exists in AWS: $DB_ID"
             terraform state show 'module.rds[0].aws_db_instance.this' >/dev/null 2>&1 || \
-              terraform import 'module.rds[0].aws_db_instance.this' "$DB_ID"
+              terraform import $VARS 'module.rds[0].aws_db_instance.this' "$DB_ID"
           else
             echo "DB instance not found; Terraform will create it."
           fi
@@ -277,21 +276,18 @@ jobs:
           set -e
           ROLE_NAME="${{ env.PROJECT_NAME }}-ec2-role"
           PROFILE_NAME="${{ env.PROJECT_NAME }}-ec2-profile"
-          VARS="-var-file=env/dev.tfvars -var=image_tag=${{ steps.vars.outputs.sha }}"
+          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
 
-          # Role
           if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
             terraform state show aws_iam_role.ec2_role >/dev/null 2>&1 || \
             terraform import $VARS aws_iam_role.ec2_role "$ROLE_NAME"
           fi
 
-          # Instance profile
           if aws iam get-instance-profile --instance-profile-name "$PROFILE_NAME" >/dev/null 2>&1; then
             terraform state show aws_iam_instance_profile.ec2_profile >/dev/null 2>&1 || \
             terraform import $VARS aws_iam_instance_profile.ec2_profile "$PROFILE_NAME"
           fi
 
-          # Attachments (import id = ROLE_NAME/POLICY_ARN)
           if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
             ECR_POLICY_ARN="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
             SSM_POLICY_ARN="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -318,13 +314,13 @@ jobs:
           echo "Listing bucket root:"
           aws s3 ls "s3://${{ steps.acct.outputs.BUCKET }}/" || true
 
-      # 9) One-time imports if named resources already exist in AWS
       - name: Import ECR repo if it exists (idempotent)
         working-directory: infra
         run: |
           set -e
           REPO_NAME="${{ env.PROJECT_NAME }}-repo"
           TF_ADDR="module.ecr.aws_ecr_repository.repo"
+          VARS="-var-file=env/dev.tfvars -var=\"image_tag=${{ steps.vars.outputs.sha }}\""
 
           if aws ecr describe-repositories --region ${{ env.AWS_REGION }} --repository-names "$REPO_NAME" >/dev/null 2>&1; then
             echo "ECR repo exists in AWS: $REPO_NAME"
@@ -332,25 +328,12 @@ jobs:
               echo "Repo already in Terraform state: $TF_ADDR"
             else
               echo "Importing $REPO_NAME into state at $TF_ADDR"
-              terraform import -input=false -var-file=env/dev.tfvars "$TF_ADDR" "$REPO_NAME"
+              terraform import -input=false $VARS "$TF_ADDR" "$REPO_NAME"
             fi
           else
             echo "ECR repo not found; Terraform will create it."
           fi
 
-#      - name: Import RDS subnet group if it exists (idempotent)
-#        working-directory: infra
-#        run: |
-#          set -e
-#          if aws rds describe-db-subnet-groups --db-subnet-group-name ${{ env.PROJECT_NAME }}-db-subnets >/dev/null 2>&1; then
-#            terraform state show 'module.rds.aws_db_subnet_group.this' >/dev/null 2>&1 || \
-#            terraform import -input=false -var-file=env/dev.tfvars 'module.rds.aws_db_subnet_group.this' ${{ env.PROJECT_NAME }}-db-subnets
-#          else
-#            echo "DB subnet group not found; Terraform will create it."
-#          fi
-
-
-      # 10) Apply with bounded retries (handles transient DNS/egress)
       - name: Terraform apply (bounded retries)
         working-directory: infra
         run: |
@@ -387,7 +370,6 @@ jobs:
           REPO_URI=$(terraform output -raw ecr_repository_url)
           echo "repo_uri=$REPO_URI" >> $GITHUB_OUTPUT
 
-      # 12) Post-apply build & push
       - name: Post-apply build & push (multi-arch; ensure image present)
         uses: docker/build-push-action@v6
         with:
@@ -401,11 +383,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 13) Terraform outputs
       - name: Terraform outputs (ALB DNS)
         working-directory: infra
         run: |
           terraform output || true
           echo "ALB DNS: $(terraform output -raw alb_dns || true)"
-
-
