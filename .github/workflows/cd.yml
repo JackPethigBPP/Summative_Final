@@ -176,27 +176,58 @@ jobs:
           set -e
           AWS_REGION="${{ env.AWS_REGION }}"
           PROJECT_NAME="${{ env.PROJECT_NAME }}"
-          SG_NAME="${PROJECT_NAME}-rds-sg"
           TF_ADDR='module.rds[0].aws_security_group.rds'
           VARS=( -var-file=env/dev.tfvars -var="image_tag=${{ steps.vars.outputs.sha }}" )
 
-          if ! grep -Eq '^\s*enable_rds\s*=\s*true\s*$' env/dev.tfvars; then
+          # More tolerant check (handles enable_rds=true or enable_rds = true)
+          if ! grep -Eq '^\s*enable_rds\s*=\s*true\b' env/dev.tfvars; then
             echo "enable_rds is not true; skipping RDS SG import."
             exit 0
           fi
 
+          # Find the VPC ID by Name tag
+          VPC_ID="$(aws ec2 describe-vpcs \
+            --region "$AWS_REGION" \
+            --filters "Name=tag:Name,Values=${PROJECT_NAME}-vpc" \
+            --query "Vpcs[0].VpcId" \
+            --output text 2>/dev/null || true)"
+
+          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "ERROR: Could not find VPC tagged Name=${PROJECT_NAME}-vpc"
+            exit 1
+          fi
+
+          # Find the SG by name AND vpc-id
           SG_ID="$(aws ec2 describe-security-groups \
             --region "$AWS_REGION" \
-            --filters "Name=group-name,Values=$SG_NAME" \
+            --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=${PROJECT_NAME}-rds-sg" \
             --query "SecurityGroups[0].GroupId" \
             --output text 2>/dev/null || true)"
 
-          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-            echo "Found existing SG $SG_NAME -> $SG_ID"
-            terraform state show "$TF_ADDR" >/dev/null 2>&1 || \
+          if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
+            echo "No SG found; Terraform will create it."
+            exit 0
+          fi
+
+          echo "Found existing SG ${PROJECT_NAME}-rds-sg in $VPC_ID -> $SG_ID"
+
+          echo "==== Debug: does address exist in state? ===="
+          terraform state list | grep -F "$TF_ADDR" || echo "Not in state: $TF_ADDR"
+
+          # If present in state, ensure it maps to the same SG id; otherwise replace it
+          if terraform state show "$TF_ADDR" >/dev/null 2>&1; then
+            CURRENT_ID="$(terraform state show "$TF_ADDR" | awk '/^id\s+=\s+/{print $3; exit}' || true)"
+            echo "State currently has id=$CURRENT_ID for $TF_ADDR"
+
+            if [ -n "$CURRENT_ID" ] && [ "$CURRENT_ID" != "$SG_ID" ]; then
+              echo "State has different SG ($CURRENT_ID) than AWS ($SG_ID). Fixing state..."
+              terraform state rm "$TF_ADDR"
               terraform import -lock-timeout=5m "${VARS[@]}" "$TF_ADDR" "$SG_ID"
+            else
+              echo "Correct SG already in state: $TF_ADDR"
+            fi
           else
-            echo "No SG named $SG_NAME found; Terraform will create it."
+            terraform import -lock-timeout=5m "${VARS[@]}" "$TF_ADDR" "$SG_ID"
           fi
 
       - name: Import RDS subnet group if it exists (idempotent)
