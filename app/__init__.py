@@ -11,6 +11,14 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
+    @app.context_processor
+    def inject_build_info():
+        import os
+        return {
+            "app_version": os.getenv("APP_VERSION", "dev"),
+            "app_build_time": os.getenv("APP_BUILD_TIME", ""),
+        }
+
     @app.route("/healthz", methods=["GET"])
     def healthz():
         return "OK", 200
